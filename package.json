@@ -1,7 +1,7 @@
 {
   "name": "tomail",
   "productName": "Tomail",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Tomail \u2014 a fast desktop email client for Gmail and Google Workspace",
   "private": true,
   "main": "electron/main.js",
@@ -48,13 +48,31 @@
     ],
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ]
     },
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "category": "Network",
       "maintainer": "TommyT1988"

@@ -38,7 +38,7 @@ Sign-in tokens are stored encrypted with your operating system's keychain.
 
 ## Install
 Download the installer for your platform from the [Releases](https://github.com/TommyT1988/tomail/releases) page:
-`Tomail-Setup-x.y.z.exe` (Windows), `Tomail-x.y.z.dmg` (macOS), `Tomail-x.y.z.AppImage` or `.deb` (Linux).
+Windows `-win-x64.exe` / `-win-arm64.exe`, macOS `-mac-x64.dmg` (Intel) / `-mac-arm64.dmg` (Apple Silicon), Linux `-linux-x86_64.AppImage` or `-linux-arm64.AppImage` (plus `.deb` for both).
 
 > Builds are not code-signed yet. Windows SmartScreen and macOS Gatekeeper will warn on first launch
 > ("More info → Run anyway" / right-click → Open).
