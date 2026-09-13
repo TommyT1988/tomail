@@ -281,3 +281,20 @@ a { color: var(--accent); }
 .shortcuts kbd { background: var(--group); border: 1px solid var(--border); border-radius: 3px; padding: 0 6px; font-family: inherit; font-size: 12px; }
 .outbox .row .from { color: var(--accent); }
 .swatches { display: flex; gap: 4px; flex-wrap: wrap; padding: 6px 12px; } .swatches span { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; } .swatches span:hover { border-color: var(--text); }
+
+/* ── recipient chips ── */
+.chips-field { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; background: #fff; min-height: 30px; cursor: text; }
+:root.dark .chips-field { background: var(--panel); }
+.chips-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(47,111,203,.15); }
+.chips-field input { border: 0 !important; box-shadow: none !important; padding: 2px 4px !important; flex: 1; min-width: 80px; background: transparent !important; }
+.chips-field .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-bg); color: var(--text); border: 1px solid transparent; border-radius: 12px; padding: 1px 4px 1px 10px; font-size: 12px; cursor: default; user-select: none; max-width: 320px; }
+.chips-field .chip.sel { background: var(--accent); color: #fff; }
+.chips-field .chip.bad { background: #fde8e6; color: #a12b1f; } :root.dark .chips-field .chip.bad { background: #4a2622; color: #f3b5ae; }
+.chips-field .chip button { padding: 0 5px; border-radius: 10px; color: inherit; font-size: 11px; line-height: 16px; } .chips-field .chip button:hover { background: rgba(0,0,0,.15); }
+.compose .field .addr { min-width: 0; }
+/* ── emoji picker ── */
+.emoji.menu { width: 340px; left: 0; top: 100%; }
+.emoji .egrid-wrap { max-height: 280px; overflow: auto; }
+.emoji .egrid { display: flex; flex-wrap: wrap; padding: 2px 8px 6px; }
+.emoji .egrid button { font-size: 20px; padding: 2px 4px; line-height: 1.3; border-radius: 4px; }
+.compose.standalone .mh { gap: 6px; } .compose.standalone .mh .primary { padding: 5px 14px; }

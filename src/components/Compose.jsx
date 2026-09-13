@@ -84,7 +84,16 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
   if (!loaded) return null;
   return (
     <ComposeFrame standalone={standalone} onBackdrop={() => { if (!sending) close(); }}>
-        <div className="mh">{({ new: 'New message', reply: 'Reply', replyAll: 'Reply all', forward: 'Forward' })[draft.mode]}<span className="draftstate">{saveState}</span>{!standalone && <button className="x" onClick={close} disabled={sending}>✕</button>}</div>
+        <div className="mh">
+          {standalone ? <>
+            <button className="primary" onClick={send} disabled={sending}>{sending ? 'Sending…' : <><Icon name="send" /> Send</>}</button>
+            <button onClick={pick} disabled={sending}><Icon name="clip" /> Attach</button>
+            <button onClick={save} disabled={sending}>Save draft</button>
+            <span className="draftstate">{saveState}</span>
+            <span className="spacer" />
+            <button onClick={discard} disabled={sending} title="Delete this draft and close"><Icon name="trash" /> Discard</button>
+          </> : <>{({ new: 'New message', reply: 'Reply', replyAll: 'Reply all', forward: 'Forward' })[draft.mode]}<span className="draftstate">{saveState}</span><button className="x" onClick={close} disabled={sending}>✕</button></>}
+        </div>
         <div className="mb">
           <div className="field"><label>From</label>
             {accounts.length > 1 ? <select value={accountId} onChange={e => { const id = Number(e.target.value); const old = sigHtml(acct), nu = sigHtml(accounts.find(a => a.id === id)); setAccountId(id); setF(x => ({ ...x, html: old && x.html.endsWith(old) ? x.html.slice(0, -old.length) + nu : x.html })); dirty.current = true; scheduleSave(); }}>{accounts.map(a => <option key={a.id} value={a.id}>{a.display_name && a.display_name !== a.email ? `${a.display_name} <${a.email}>` : a.email}</option>)}</select>
@@ -103,13 +112,13 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
           )}
           {f.quotedHtml && <div className="quote"><div className="muted" style={{ marginBottom: 4 }}>Quoted message (sent below your text)</div><iframe title="quoted" sandbox="" srcDoc={buildDoc(f.quotedHtml, { allowRemote: false })} /></div>}
         </div>
-        <div className="mf">
+        {!standalone && <div className="mf">
           <button className="primary" onClick={send} disabled={sending}>{sending ? 'Sending…' : <><Icon name="send" /> Send</>}</button>
           <button onClick={pick} disabled={sending}><Icon name="clip" /> Attach</button>
           <button onClick={save} disabled={sending}>Save draft</button>
           <span className="spacer" />
           <button onClick={discard} disabled={sending}>Discard</button>
-        </div>
+        </div>}
     </ComposeFrame>
   );
 }

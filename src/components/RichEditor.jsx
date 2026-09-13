@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import EmojiPicker from './EmojiPicker.jsx';
 import Icon from './Icons.jsx';
 
 const ALLOWED = /^(B|I|U|STRONG|EM|P|DIV|BR|UL|OL|LI|A|BLOCKQUOTE|IMG|SPAN|H[1-6]|PRE|CODE|TABLE|TBODY|TR|TD|TH|HR|S|STRIKE|FONT|SUP|SUB)$/;
@@ -20,6 +21,10 @@ export function cleanHtml(html) {
 export default function RichEditor({ value, onChange, placeholder = 'Write your message…', autoFocus }) {
   const ref = useRef(null);
   const last = useRef(value);
+  const [emoji, setEmoji] = useState(false);
+  const savedRange = useRef(null);
+  const saveRange = () => { const s = window.getSelection(); if (s && s.rangeCount && ref.current?.contains(s.anchorNode)) savedRange.current = s.getRangeAt(0).cloneRange(); };
+  const insertEmoji = (e) => { ref.current.focus(); const s = window.getSelection(); if (savedRange.current) { s.removeAllRanges(); s.addRange(savedRange.current); } document.execCommand('insertText', false, e); emit(); saveRange(); };
   useEffect(() => { if (ref.current && value !== last.current && value !== ref.current.innerHTML) { ref.current.innerHTML = value || ''; last.current = value; } }, [value]);
   useEffect(() => { if (ref.current) { ref.current.innerHTML = value || ''; last.current = value; if (autoFocus) { ref.current.focus(); placeCaretAtStart(ref.current); } } }, []); // eslint-disable-line
   const emit = () => { const h = ref.current.innerHTML; last.current = h; onChange(h); };
@@ -50,8 +55,10 @@ export default function RichEditor({ value, onChange, placeholder = 'Write your 
         <B title="Link (Ctrl+K)" onClick={link}><Icon name="external" size={12} /> Link</B><B title="Insert image" onClick={image}><Icon name="image" size={12} /> Image</B>
         <span className="sp" />
         <B c="removeFormat" title="Clear formatting">Tx</B>
+        <span className="sp" />
+        <span style={{ position: 'relative' }}><B title="Emoji" onClick={() => { saveRange(); setEmoji(v => !v); }}>😊</B>{emoji && <EmojiPicker onPick={insertEmoji} onClose={() => setEmoji(false)} />}</span>
       </div>
-      <div className="ed" ref={ref} contentEditable suppressContentEditableWarning data-placeholder={placeholder} onInput={emit} onBlur={emit} onPaste={onPaste} onKeyDown={onKey} spellCheck />
+      <div className="ed" ref={ref} contentEditable suppressContentEditableWarning data-placeholder={placeholder} onInput={emit} onBlur={() => { saveRange(); emit(); }} onKeyUp={saveRange} onMouseUp={saveRange} onPaste={onPaste} onKeyDown={onKey} spellCheck />
     </div>
   );
 }
