@@ -1,7 +1,7 @@
 {
   "name": "tomail",
   "productName": "Tomail",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Tomail \u2014 a fast desktop email client for Gmail and Google Workspace",
   "private": true,
   "main": "electron/main.js",
@@ -36,7 +36,7 @@
   },
   "build": {
     "appId": "app.tomail.desktop",
-    "productName": "Mail",
+    "productName": "Tomail",
     "directories": {
       "output": "release"
     },
@@ -61,8 +61,20 @@
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.productivity"
     },
@@ -77,7 +89,8 @@
         "repo": "tomail",
         "releaseType": "release"
       }
-    ]
+    ],
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   },
   "license": "MIT",
   "author": "Tomas (TommyT1988)",
