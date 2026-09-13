@@ -88,7 +88,7 @@ function Header({ message, onPrint, extra, onPopOut }) {
       <div className="line first"><span><b>{fmtAddrFull(from)}</b></span><span className="when">{fmtFull(message.date)}</span>
         <span className="hbtns">{onPopOut && <button title="Open in a new window (o)" onClick={() => onPopOut(message)}><Icon name="external" size={12} /> Window</button>}<button title="Print" onClick={() => onPrint(message)}>Print</button>{extra}</span></div>
       <div className="line"><span>to {addrList(message.to) || '—'}</span>{message.cc?.length > 0 && <span>· cc {addrList(message.cc)}</span>}</div>
-      {message.labels?.length > 0 && <div className="labs">{message.labels.filter(l => !['UNREAD', 'CATEGORY_PERSONAL'].includes(l)).map(l => <span key={l}>{l.replace(/^CATEGORY_/, '').toLowerCase()}</span>)}</div>}
+      {message.labels?.length > 0 && <div className="labs">{message.labels.filter(l => !['UNREAD', 'CATEGORY_PERSONAL'].includes(l) && !/^Label_\d+$/.test(l) && !/^\$Tomail/.test(l)).map(l => <span key={l}>{l.replace(/^CATEGORY_/, '').toLowerCase()}</span>)}</div>}
     </div>
   );
 }
