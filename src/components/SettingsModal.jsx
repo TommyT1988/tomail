@@ -84,7 +84,7 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
             <div className="frow"><label>Data folder</label><small style={{ gridColumn: 2 }}>{info?.userData} · secrets {info?.encrypted ? 'encrypted with the OS keychain' : 'stored unencrypted (no keychain available)'} · v{info?.version}</small></div>
           </>}
           {tab === 'accounts' && <>
-            {accounts.map(a => (
+            {accounts.map((a, i) => (
               <div className="acct" key={a.id} style={{ flexWrap: 'wrap' }}>
                 <span className="em">{a.email}</span>
                 <span className="muted" style={{ fontSize: 11, border: '1px solid var(--border)', borderRadius: 3, padding: '0 4px' }}>{a.kind === 'imap' ? 'IMAP' : 'Google'}</span>
@@ -92,6 +92,8 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
                 {a.last_error && <span style={{ color: '#c0392b' }} title={a.last_error}>⚠ {a.last_error.slice(0, 60)}</span>}
                 <span className="spacer" />
                 {/Token refresh failed|invalid_grant|sign in again|auth|login/i.test(a.last_error || '') && (a.kind === 'imap' ? <button className="primary" onClick={() => setShowImap(true)}>Re-enter password</button> : <button className="primary" onClick={() => addGoogle(false)} disabled={busy}>Sign in again</button>)}
+                <button title="Move up" disabled={i === 0} onClick={async () => { const ids = accounts.map(x => x.id); ids.splice(i, 1); ids.splice(i - 1, 0, a.id); await window.mail.accounts.reorder(ids); refreshAccounts(); }}>▲</button>
+                <button title="Move down" disabled={i === accounts.length - 1} onClick={async () => { const ids = accounts.map(x => x.id); ids.splice(i, 1); ids.splice(i + 1, 0, a.id); await window.mail.accounts.reorder(ids); refreshAccounts(); }}>▼</button>
                 <button onClick={() => setSigEdit(sigEdit === a.id ? null : a.id)}>Signature</button>
                 <button onClick={async () => { const n = prompt('Display name (used in From):', a.display_name || ''); if (n != null) { await window.mail.accounts.rename(a.id, n); refreshAccounts(); } }}>Rename</button>
                 {a.kind !== 'imap' && !a.canDeleteForever && <button title="Re-sign-in granting full Gmail access so Tomail can empty Trash / delete permanently" onClick={() => addGoogle(true)} disabled={busy}>Grant full access</button>}

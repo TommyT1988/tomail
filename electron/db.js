@@ -150,6 +150,7 @@ class MailDb {
     if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;');
+    this.db.function('regexp_strip', { deterministic: true }, (s) => String(s || '').replace(/^\s*((re|fwd?|aw|wg)\s*:\s*)+/i, ''));
     this.db.exec(SCHEMA);
     this._migrate();
     this._stmts = new Map();
@@ -186,6 +187,7 @@ class MailDb {
       .run(email, displayName || null, tokenEnc, pos, kind, imapJson);
     return this.getAccountByEmail(email);
   }
+  reorderAccounts(ids) { this.tx(() => ids.forEach((id, i) => this.prep('UPDATE accounts SET position = ? WHERE id = ?').run(i + 1, id))); }
   updateAccount(id, fields) {
     const keys = Object.keys(fields);
     if (!keys.length) return;
@@ -355,8 +357,8 @@ class MailDb {
   listMessages(view, { offset = 0, limit = 100 } = {}) {
     const { where, params, join } = this._viewSql(view);
     const sql = `SELECT m.rid, m.account_id, m.id, m.thread_id, m.internal_date, m.size, m.snippet, m.subject, m.from_name,
-        m.from_email, m.to_json, m.has_attachment, m.unread, m.starred, m.labels_json, m.snooze_until
-      FROM messages m ${join} WHERE ${where} ORDER BY m.internal_date DESC LIMIT ? OFFSET ?`;
+        m.from_email, m.to_json, m.has_attachment, m.unread, m.starred, m.labels_json, m.snooze_until, m.answered, m.imap_folder, m.imap_uid
+      FROM messages m ${join} WHERE ${where} ORDER BY ${orderSql(view, 'm')} LIMIT ? OFFSET ?`;
     return this.prep(sql).all(...params, limit, offset).map(rowToListItem);
   }
   countMessages(view) {
@@ -424,7 +426,7 @@ class MailDb {
         m.has_attachment, m.unread, m.starred, m.labels_json, m.snooze_until, m.answered, m.imap_folder, m.imap_uid,
         t.n AS thread_count, t.u AS thread_unread
       FROM t JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.thread_id AND m.internal_date = t.d
-      GROUP BY m.account_id, m.thread_id ORDER BY t.d DESC LIMIT ? OFFSET ?`;
+      GROUP BY m.account_id, m.thread_id ORDER BY ${orderSql(view, 'm', 't.d')} LIMIT ? OFFSET ?`;
     return this.prep(sql).all(...params, limit, offset).map(rowToListItem);
   }
   countThreads(view) {
@@ -522,6 +524,18 @@ class MailDb {
   kvSet(k, v) { this.prep('INSERT OR REPLACE INTO kv (k, v) VALUES (?,?)').run(k, JSON.stringify(v)); }
 }
 
+/** ORDER BY for a view: { col: 'date'|'size'|'from'|'subject', dir: 'asc'|'desc' } (default date desc). */
+function orderSql(view, m, dateExpr) {
+  const s = view.sort || {};
+  const dir = s.dir === 'asc' ? 'ASC' : 'DESC';
+  const date = dateExpr || `${m}.internal_date`;
+  switch (s.col) {
+    case 'size': return `${m}.size ${dir}, ${date} DESC`;
+    case 'from': return `lower(coalesce(nullif(${m}.from_name,''), ${m}.from_email)) ${dir}, ${date} DESC`;
+    case 'subject': return `lower(regexp_strip(${m}.subject)) ${dir}, ${date} DESC`;
+    default: return `${date} ${dir}`;
+  }
+}
 function categorySql(category, hasLabel) {
   if (category === 'primary') return `NOT (${CATEGORY_LABELS.map(hasLabel).join(' OR ')})`;
   return hasLabel(category);

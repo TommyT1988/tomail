@@ -76,9 +76,8 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
   const pick = async () => { const files = await window.mail.compose.pickFiles(); if (files.length) { setF(x => ({ ...x, attachments: [...x.attachments, ...files] })); dirty.current = true; scheduleSave(); } };
   const acct = accounts.find(a => a.id === accountId);
   if (!loaded) return null;
-  const Wrap = standalone ? ({ children }) => <div className="compose standalone">{children}</div> : ({ children }) => <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget && !sending) close(); }}><div className="modal compose" style={{ width: 860 }}>{children}</div></div>;
   return (
-    <Wrap>
+    <ComposeFrame standalone={standalone} onBackdrop={() => { if (!sending) close(); }}>
         <div className="mh">{({ new: 'New message', reply: 'Reply', replyAll: 'Reply all', forward: 'Forward' })[draft.mode]}<span className="draftstate">{saveState}</span>{!standalone && <button className="x" onClick={close} disabled={sending}>✕</button>}</div>
         <div className="mb">
           <div className="field"><label>From</label>
@@ -105,8 +104,14 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
           <span className="spacer" />
           <button onClick={discard} disabled={sending}>Discard</button>
         </div>
-    </Wrap>
+    </ComposeFrame>
   );
+}
+
+/** Stable wrapper component (defining it inside Compose would remount the editor on every render). */
+function ComposeFrame({ standalone, onBackdrop, children }) {
+  if (standalone) return <div className="compose standalone">{children}</div>;
+  return <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onBackdrop(); }}><div className="modal compose" style={{ width: 860 }}>{children}</div></div>;
 }
 
 /** data: images pasted into the editor become cid: attachments (email clients don't render huge data URLs). */

@@ -103,7 +103,7 @@ function notifyNewMail(accountId, ids) {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1280, height: 1015, minWidth: 900, minHeight: 600, title: 'Tomail', autoHideMenuBar: true, show: false,
+    width: 1280, height: 1015, minWidth: 900, minHeight: 600, title: `Tomail ${app.getVersion()}`, autoHideMenuBar: true, show: false,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1f22' : '#f6f6f6',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true },
   });
@@ -142,7 +142,7 @@ function createWindow() {
         await wait(800);
         await js(`(() => { const r = [...document.querySelectorAll('.row')].find(r => r.textContent.includes('Quote for 20')); if (r) r.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); })()`);
         await wait(1000); await shot('5-thread.png');
-        await js(`(() => { const b = [...document.querySelectorAll('.status button')].find(b => /Settings/.test(b.textContent)); b && b.click(); })()`);
+        await js(`(() => { const b = [...document.querySelectorAll('.topbar button')].find(b => /Settings/.test(b.textContent)); b && b.click(); })()`);
         await wait(600); await shot('6-settings.png');
         await js(`(() => { const b = [...document.querySelectorAll('.settings .tabs button')].find(b => /Rules/.test(b.textContent)); b && b.click(); })()`);
         await wait(500); await shot('8-rules.png');
@@ -221,6 +221,7 @@ function registerIpc() {
     return { account: { ...account, token_enc: undefined, imap_json: undefined }, existed };
   });
   handle('accounts:remove', async (id) => { await accounts.remove(id); delete syncStatus[id]; notifyChanged(); return true; });
+  handle('accounts:reorder', (ids) => { db.reorderAccounts(ids); notifyChanged(); return true; });
   handle('accounts:rename', (id, name) => { db.updateAccount(id, { display_name: name }); notifyChanged(); return true; });
   handle('accounts:setSignature', (id, sig) => { db.updateAccount(id, { signature: sig }); notifyChanged(); return true; });
   handle('accounts:resync', (id) => { accounts.forget(id); db.resetAccountSync(id); notifyChanged(); syncAll(id).catch(() => {}); return true; });

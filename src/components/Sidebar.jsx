@@ -13,8 +13,11 @@ function Item({ active, onClick, icon, name, count, unread, indent = 0, tw, cls 
   );
 }
 
-export default function Sidebar({ accounts, labels, counts, view, setView, status, draftCounts }) {
+export default function Sidebar({ accounts, labels, counts, view, setView, status, draftCounts, onReorder }) {
   const [collapsed, setCollapsed] = useState({});
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const drop = (targetId) => { if (dragId == null || dragId === targetId) return; const ids = accounts.map(a => a.id); const from = ids.indexOf(dragId), to = ids.indexOf(targetId); ids.splice(from, 1); ids.splice(to, 0, dragId); onReorder?.(ids); setDragId(null); setOverId(null); };
   const toggle = (k) => setCollapsed(c => ({ ...c, [k]: !c[k] }));
   const strip = (v) => { const { category, filters, threaded, ...rest } = v || {}; return JSON.stringify(rest); };
   const isView = (v) => strip(view) === strip(v);
@@ -58,7 +61,8 @@ export default function Sidebar({ accounts, labels, counts, view, setView, statu
           const folders = [...SYSTEM_FOLDERS.slice(0, 5), ...(hasArchive ? [{ id: 'ARCHIVE', name: 'Archive', icon: 'archive' }] : []), SYSTEM_FOLDERS[5]];
           return (
             <React.Fragment key={a.id}>
-              <div className="sect" onClick={() => toggle(key)} title={`${a.email} (${a.kind === 'imap' ? 'IMAP' : 'Google'})`}>
+              <div className={'sect acct' + (overId === a.id ? ' over' : '')} onClick={() => toggle(key)} title={`${a.email} (${a.kind === 'imap' ? 'IMAP' : 'Google'}) — drag to reorder`} draggable
+                onDragStart={(e) => { setDragId(a.id); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={(e) => { e.preventDefault(); setOverId(a.id); }} onDragLeave={() => setOverId(null)} onDrop={(e) => { e.preventDefault(); drop(a.id); }} onDragEnd={() => { setDragId(null); setOverId(null); }}>
                 <span className="tw">{collapsed[key] ? '▸' : '▾'}</span><Icon name="mail" size={12} /> <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.email}</span>
                 {busy && <span className="spin" title={st.phase === 'initial' ? `Initial sync ${st.synced?.toLocaleString() || 0}${st.total ? ' / ' + st.total.toLocaleString() : ''}${st.folder ? ' · ' + st.folder : ''}` : 'Checking…'} />}
                 {st?.phase === 'error' && <span title={st.error} style={{ color: '#c0392b' }}>⚠</span>}

@@ -2,15 +2,18 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { CATEGORIES, dayGroup, fmtAddr, fmtSize, fmtTime, keyOf } from '../util.js';
 import Icon from './Icons.jsx';
 
-export default function MessageList({ items, total, loading, view, setView, selected, onSelect, onOpen, onLoadMore, hasMore, accounts, labelsById, showCategories, onKey, threaded, setThreaded }) {
+export default function MessageList({ items, total, loading, view, setView, selected, onSelect, onOpen, onLoadMore, hasMore, accounts, labelsById, showCategories, onKey, threaded, setThreaded, onSort }) {
   const ref = useRef(null);
   const selSet = useMemo(() => new Set(selected.map(keyOf)), [selected]);
   const multiAccount = accounts.length > 1;
+  const sortCol = view.sort?.col || 'date', sortDir = view.sort?.dir || 'desc';
   const groups = useMemo(() => {
+    if (sortCol !== 'date') return [{ name: null, items }];
     const out = []; let cur = null;
     for (const m of items) { const g = dayGroup(m.date); if (!cur || cur.name !== g) { cur = { name: g, items: [] }; out.push(cur); } cur.items.push(m); }
     return out;
-  }, [items]);
+  }, [items, sortCol]);
+  const Th = ({ col, children, right }) => <span className={'th' + (sortCol === col ? ' on' : '')} style={right ? { textAlign: 'right' } : undefined} onClick={() => onSort?.(col)} title="Click to sort">{children}{sortCol === col && <span className="arrow">{sortDir === 'asc' ? '▲' : '▼'}</span>}</span>;
   useEffect(() => {
     const el = ref.current; if (!el) return;
     const h = () => { if (hasMore && !loading && el.scrollTop + el.clientHeight > el.scrollHeight - 300) onLoadMore(); };
@@ -36,12 +39,12 @@ export default function MessageList({ items, total, loading, view, setView, sele
         {!isDrafts && <button className="tab" title="Group messages by conversation" onClick={() => setThreaded(!threaded)} style={{ padding: '4px 8px' }}><Icon name="layers" size={12} /> {threaded ? 'Conversations: on' : 'Conversations: off'}</button>}
         <span className="count">{loading && !items.length ? 'Loading…' : `${(total ?? items.length).toLocaleString()} ${isDrafts ? 'draft' : threaded ? 'conversation' : 'message'}${total === 1 ? '' : 's'}`}</span>
       </div>
-      <div className="cols"><span /><span>{isDrafts ? 'To' : 'From'}</span><span>Subject</span><span style={{ textAlign: 'right' }}>{isDrafts ? 'Saved' : 'Received'}</span><span style={{ textAlign: 'right' }}>Size</span></div>
+      <div className="cols"><span /><Th col="from">{isDrafts ? 'To' : 'From'}</Th><Th col="subject">Subject</Th><Th col="date" right>{isDrafts ? 'Saved' : 'Received'}</Th><Th col="size" right>Size</Th></div>
       <div className="rows" ref={ref} tabIndex={0} onKeyDown={onKey}>
         {!items.length && !loading && <div className="empty"><div className="big">▭</div><div>{isDrafts ? 'No drafts' : 'No messages here'}</div></div>}
         {groups.map(g => (
-          <React.Fragment key={g.name}>
-            <div className="grp">{g.name}</div>
+          <React.Fragment key={g.name || 'all'}>
+            {g.name && <div className="grp">{g.name}</div>}
             {g.items.map(m => {
               const k = keyOf(m);
               const labs = isDrafts ? [] : otherLabels(m);

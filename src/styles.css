@@ -76,6 +76,9 @@ a { color: var(--accent); }
 .tabs .spacer { flex: 1; }
 .tabs .count { color: var(--muted); font-size: 12px; padding-right: 4px; }
 .cols { display: grid; grid-template-columns: 20px 290px 1fr 80px 70px; padding: 4px 12px 4px 8px; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--border); }
+.cols .th { cursor: pointer; user-select: none; } .cols .th:hover, .cols .th.on { color: var(--text); } .cols .th .arrow { font-size: 8px; margin-left: 4px; }
+.tree .sect.acct { cursor: grab; } .tree .sect.acct.over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.topbar .right { display: flex; gap: 4px; align-items: center; }
 .rows { flex: 1; overflow: auto; outline: none; }
 .grp { background: var(--group); font-size: 11px; font-weight: 600; padding: 3px 8px; color: #555; position: sticky; top: 0; }
 .row { display: grid; grid-template-columns: 20px 290px 1fr 80px 70px; align-items: center; height: var(--row-h); padding: 0 12px 0 8px; cursor: default; user-select: none; }

@@ -92,7 +92,7 @@ export default function App() {
     finally { setLoading(false); }
   }, [toast, draftItems]);
 
-  useEffect(() => { mail.app.info().then(setInfo); mail.settings.get().then(s => { setPrefs(s.prefs); applyTheme(s.prefs.theme); if (s.prefs.threaded && localStorage.getItem('threaded') == null) setThreadedRaw(true); }); loadMeta(); }, [loadMeta]);
+  useEffect(() => { mail.app.info().then(i => { setInfo(i); document.title = `Tomail ${i.version}${i.demo ? ' (demo)' : ''}`; }); mail.settings.get().then(s => { setPrefs(s.prefs); applyTheme(s.prefs.theme); if (s.prefs.threaded && localStorage.getItem('threaded') == null) setThreadedRaw(true); }); loadMeta(); }, [loadMeta]);
   useEffect(() => { loadList(view); }, [view, threaded, loadList]);
   useEffect(() => {
     const off1 = mail.on('mail:changed', () => { loadMeta(); loadList(viewRef.current); });
@@ -137,7 +137,8 @@ export default function App() {
   const selectIndex = (i) => { const m = itemsRef.current[i]; if (m) { setSelected([{ accountId: m.accountId, id: m.id }]); setAnchor(i); } };
   const curIndex = () => { const s = selected[selected.length - 1]; return s ? itemsRef.current.findIndex(i => i.id === s.id && i.accountId === s.accountId) : -1; };
   const openItem = async (m) => {
-    if (!m?.isDraft) return;
+    if (!m) return;
+    if (!m.isDraft) { openCompose('reply', m); return; }   // double-click a message = reply
     if (m.remoteDraft) { try { const d = await mail.drafts.openRemote(m.accountId, m.id); mail.compose.open({ mode: 'new', accountId: m.accountId, draftId: d.id }); } catch (e) { toast(e.message, true); } }
     else mail.compose.open({ mode: 'new', accountId: m.accountId, draftId: m.draftId });
   };
@@ -171,7 +172,7 @@ export default function App() {
   const doMove = (labelId) => act((t) => mail.actions.move(t, labelId, view.kind === 'label' ? view.labelId : (view.kind === 'all-inboxes' ? 'INBOX' : null)), 'Moved %n');
   const openCompose = (mode, m = message) => {
     if (mode === 'new') { mail.compose.open({ mode, accountId: view.accountId || selAccount?.id || accounts[0]?.id }).catch(e => toast(e.message, true)); return; }
-    if (!m || !m.bodyFetched) { toast('Open a message first', true); return; }
+    if (!m) { toast('Select a message first', true); return; }
     mail.compose.open({ mode, accountId: m.accountId, originalId: m.id }).catch(e => toast(e.message, true));
   };
   const runSearch = (deep) => {
@@ -202,6 +203,7 @@ export default function App() {
     const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); localStorage.setItem('listH', String(listH)); };
     document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
   };
+  const onSort = (col) => { const cur = view.sort || { col: 'date', dir: 'desc' }; const dir = cur.col === col ? (cur.dir === 'desc' ? 'asc' : 'desc') : (col === 'date' || col === 'size' ? 'desc' : 'asc'); setViewRaw({ ...view, sort: col === 'date' && dir === 'desc' ? undefined : { col, dir } }); };
   const setFilters = (f) => { const clean = Object.fromEntries(Object.entries(f || {}).filter(([, v]) => v !== undefined && v !== '' && v !== false)); setView({ ...view, filters: Object.keys(clean).length ? clean : undefined }); };
   const filterChips = Object.entries(view.filters || {}).map(([k, v]) => [k, k === 'accountId' ? accounts.find(a => a.id === v)?.email : k === 'labelId' ? (labelsById[view.accountId]?.[v]?.name || Object.values(labelsById).map(m => m[v]?.name).find(Boolean) || v) : /after|before/.test(k) ? new Date(Number(v)).toLocaleDateString('en-GB') : v === true ? '' : v]);
 
@@ -228,6 +230,7 @@ export default function App() {
           <button onClick={() => runSearch(true)} disabled={!search.trim() && !view.filters} title="Search on the mail server — bodies and attachment contents"><Icon name="search" /> Deep search</button>
           <FilterMenu filters={view.filters} setFilters={setFilters} accounts={accounts} labels={Object.values(labels).flat()} />
         </div>
+        <div className="right"><button onClick={() => setSettingsOpen(true)} title="Settings"><Icon name="settings" size={14} /> Settings</button></div>
       </div>
       <div className="toolbar">
         {accounts.length > 1
@@ -253,7 +256,7 @@ export default function App() {
         <button disabled={!hasSel} onClick={doTrash} title={inTrash ? 'Delete permanently' : 'Move to Trash'}><span className="ico"><Icon name="trash" /></span>{inTrash ? 'Delete forever' : 'Delete'}</button>
       </div>
       <div className={'body' + (sidebarOpen ? '' : ' nosidebar')}>
-        {sidebarOpen && <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} />}
+        {sidebarOpen && <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} onReorder={(ids) => mail.accounts.reorder(ids).then(loadMeta)} />}
         <div className="main">
           {!accounts.length && info && !info.demo ? (
             <div className="onboard">
@@ -272,7 +275,7 @@ export default function App() {
                 {filterChips.length > 0 && <div className="chips"><Icon name="settings" size={12} /> {filterChips.map(([k, v]) => <span className="chip" key={k}>{k}{v ? `: ${v}` : ''}<button onClick={() => setFilters({ ...view.filters, [k]: undefined })}>✕</button></span>)}<button style={{ fontSize: 11 }} onClick={() => setFilters({})}>clear</button></div>}
                 <MessageList items={items} total={total} loading={loading} view={view} setView={setViewRaw} selected={selected} onSelect={onSelect}
                   onOpen={(m) => { setSelected([{ accountId: m.accountId, id: m.id }]); openItem(m); }} onLoadMore={() => loadList(view, { append: true })} hasMore={hasMore}
-                  accounts={accounts} labelsById={labelsById} showCategories={showCategories} onKey={onKey} threaded={threaded} setThreaded={setThreaded} />
+                  accounts={accounts} labelsById={labelsById} showCategories={showCategories} onKey={onKey} threaded={threaded} setThreaded={setThreaded} onSort={onSort} />
               </div>
               <div className="divider" onMouseDown={startDrag} />
               <div className="read-wrap">
@@ -291,7 +294,7 @@ export default function App() {
         {info?.demo && <span style={{ color: '#c0392b' }}>DEMO MODE — sample data, not connected to any server</span>}
         {updateReady && <span>Tomail {updateReady.version} downloaded — <button className="primary" onClick={() => mail.app.installUpdate()}>Restart to update</button></span>}
         <span className="spacer" />
-        <button onClick={() => setSettingsOpen(true)}><Icon name="settings" size={12} /> Settings</button>
+        {info?.version && <span className="faint">v{info.version}</span>}
         <button onClick={() => { mail.sync.now(); }} disabled={!accounts.length || info?.demo}><Icon name="refresh" size={12} /> Sync now</button>
       </div>
       {settingsOpen && <SettingsModal onClose={() => { setSettingsOpen(false); setRuleSeed(null); }} accounts={accounts} labels={labels} ruleSeed={ruleSeed} refreshAccounts={loadMeta} toast={toast} info={info} initialTab={typeof settingsOpen === 'string' ? settingsOpen : undefined} />}

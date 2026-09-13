@@ -235,3 +235,16 @@ test('search filters narrow a view', () => {
   assert.equal(db.countMessages({ kind: 'all-inboxes', filters: { from: 'ann@example' } }), 2);
   assert.equal(db.countMessages({ kind: 'all-inboxes', filters: { from: 'nobody' } }), 0);
 });
+
+test('sort orders: date asc, size desc, subject ignores Re:/Fwd:', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const mk = (id, date, size, subject) => ({ id, threadId: id, internalDate: date, size, snippet: '', subject, fromName: '', fromEmail: 'x@y', to: [], cc: [], labels: ['INBOX'] });
+  db.upsertMessages(a.id, [mk('a', 3, 10, 'Zebra'), mk('b', 1, 30, 'Re: apple'), mk('c', 2, 20, 'Mango')]);
+  const ids = (v) => db.listMessages({ kind: 'all-inboxes', ...v }).map(m => m.id);
+  assert.deepEqual(ids({}), ['a', 'c', 'b']);
+  assert.deepEqual(ids({ sort: { col: 'date', dir: 'asc' } }), ['b', 'c', 'a']);
+  assert.deepEqual(ids({ sort: { col: 'size', dir: 'desc' } }), ['b', 'c', 'a']);
+  assert.deepEqual(ids({ sort: { col: 'subject', dir: 'asc' } }), ['b', 'c', 'a']);
+  db.reorderAccounts([a.id]); assert.equal(db.getAccount(a.id).position, 1);
+});
