@@ -59,7 +59,12 @@ export default function App() {
   const labelsById = useMemo(() => { const o = {}; for (const [aid, ls] of Object.entries(labels)) o[aid] = Object.fromEntries(ls.map(l => [l.id, l])); return o; }, [labels]);
   const setView = useCallback((v) => { setViewRaw(v); setSelected([]); setAnchor(null); setMessage(null); setThread(null); setMsgError(null); }, []);
   const setThreaded = (v) => { setThreadedRaw(v); localStorage.setItem('threaded', v ? '1' : '0'); setSelected([]); setMessage(null); setThread(null); };
-  const applyTheme = (t) => { document.documentElement.dataset.theme = !t || t === 'system' ? '' : t; };
+  const applyTheme = (t) => {
+    const root = document.documentElement;
+    root.dataset.theme = !t || t === 'system' ? '' : t;
+    const dark = t === 'dark' || ((!t || t === 'system') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    root.classList.toggle('dark', dark);
+  };
 
   // ── loaders ──
   const loadMeta = useCallback(async () => {
@@ -96,7 +101,7 @@ export default function App() {
     const off2 = mail.on('sync:status', (s) => setStatus(s));
     const off3 = mail.on('app:update-ready', (u) => setUpdateReady(u));
     const off4 = mail.on('app:open-message', ({ accountId, id }) => { setView(HOME); setTimeout(() => setSelected([{ accountId, id }]), 300); });
-    const mq = window.matchMedia('(prefers-color-scheme: dark)'); const onMq = () => tick(x => x + 1); mq.addEventListener('change', onMq);
+    const mq = window.matchMedia('(prefers-color-scheme: dark)'); const onMq = () => { mail.settings.get().then(s => applyTheme(s.prefs.theme)); tick(x => x + 1); }; mq.addEventListener('change', onMq);
     const t = setInterval(() => tick(x => x + 1), 30000);
     return () => { off1(); off2(); off3(); off4(); clearInterval(t); mq.removeEventListener('change', onMq); };
   }, [loadMeta, loadList, setView]);

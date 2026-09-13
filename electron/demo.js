@@ -62,7 +62,7 @@ function seedDemo(db) {
     organizer: { name: 'Sam Wood', email: 'sam@example.com' }, attendees: [{ name: 'Alex', email: 'alex@example.com', partstat: 'NEEDS-ACTION' }], method: 'REQUEST', sequence: 0 });
   for (const m of msgs) {
     const text = `Hello Alex,\n\nThis is the body of "${m.subject}".\n\nThis mailbox is running in demo mode — nothing here touches Google.\n\nKind regards,\n${m.fromName}`;
-    db.setBody(a1.id, m.id, { text, html: textToHtml(text) + '<p><a href="https://example.com">example.com</a></p>',
+    db.setBody(a1.id, m.id, { text, html: textToHtml(text) + '<p><a href="https://example.com">example.com</a></p>' + (m.id === 'demo3' ? '<img src="https://example.com/banner.png" alt="banner">' : ''),
       attachments: m.hasAttachment ? [{ filename: 'stocklist.pdf', mimeType: 'application/pdf', size: 245000, attachmentId: 'x' }] : [] });
   }
   const m2 = [{ id: 's1', threadId: 's1', internalDate: t(9, 30), size: 12000, snippet: 'Order enquiry', subject: 'Do you have the 14-inch laptop in stock?', fromName: 'A Customer', fromEmail: 'cust@example.com', to: [{ name: '', email: 'shop@example.com' }], cc: [], labels: ['INBOX', 'UNREAD'] }];

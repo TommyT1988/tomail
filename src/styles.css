@@ -168,17 +168,14 @@ a { color: var(--accent); }
 .onboard .steps { background: #fafafa; border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px 12px 32px; }
 
 /* ── dark theme ── */
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #1e1f22; --panel: #26272b; --border: #3a3b40; --text: #e6e6e6; --muted: #a0a0a6; --faint: #6f6f76; --accent: #6ea0ec; --accent-bg: #2e3b52; --sel: #34456a; --hover: #2d3036; --group: #2b2c31; color-scheme: dark; } }
-:root[data-theme="dark"] { --bg: #1e1f22; --panel: #26272b; --border: #3a3b40; --text: #e6e6e6; --muted: #a0a0a6; --faint: #6f6f76; --accent: #6ea0ec; --accent-bg: #2e3b52; --sel: #34456a; --hover: #2d3036; --group: #2b2c31; color-scheme: dark; }
-:root[data-theme="dark"] .topbar, :root[data-theme="dark"] .toolbar, :root[data-theme="dark"] .status, :root[data-theme="dark"] .read .hdr, :root[data-theme="dark"] .split .divider,
-:root[data-theme="dark"] .menu, :root[data-theme="dark"] .modal, :root[data-theme="dark"] input, :root[data-theme="dark"] select, :root[data-theme="dark"] textarea, :root[data-theme="dark"] .read .att, :root[data-theme="dark"] .settings .acct, :root[data-theme="dark"] .onboard .steps, :root[data-theme="dark"] .rich .tb { background: var(--panel); color: var(--text); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .topbar, :root:not([data-theme="light"]) .toolbar, :root:not([data-theme="light"]) .status, :root:not([data-theme="light"]) .read .hdr, :root:not([data-theme="light"]) .split .divider,
-:root:not([data-theme="light"]) .menu, :root:not([data-theme="light"]) .modal, :root:not([data-theme="light"]) input, :root:not([data-theme="light"]) select, :root:not([data-theme="light"]) textarea, :root:not([data-theme="light"]) .read .att, :root:not([data-theme="light"]) .settings .acct, :root:not([data-theme="light"]) .onboard .steps, :root:not([data-theme="light"]) .rich .tb { background: var(--panel); color: var(--text); } }
-:root[data-theme="dark"] button:hover:not(:disabled) { background: #3a3b40; } :root[data-theme="dark"] .tree .item:hover { background: #2d3036; }
-:root[data-theme="dark"] .row .lab, :root[data-theme="dark"] code { background: #3a3b40; color: #ccc; } :root[data-theme="dark"] .read .hdr .labs span { background: #2e3b52; color: #bcd0f0; }
-:root[data-theme="dark"] .read .imgbar { background: #3d3520; border-color: #6b5b26; color: #e6e6e6; } :root[data-theme="dark"] .tabs .tab.active { color: var(--accent); }
-:root[data-theme="dark"] .toolbar button .ico { color: #bbb; } :root[data-theme="dark"] .toolbar button:disabled .ico { color: #555; } :root[data-theme="dark"] button:disabled { color: #666; }
-:root[data-theme="dark"] .row.sel, :root[data-theme="dark"] .tree .item.active { color: #fff; }
+:root.dark { --bg: #1e1f22; --panel: #26272b; --border: #3a3b40; --text: #e6e6e6; --muted: #a0a0a6; --faint: #6f6f76; --accent: #6ea0ec; --accent-bg: #2e3b52; --sel: #34456a; --hover: #2d3036; --group: #2b2c31; color-scheme: dark; }
+:root.dark .topbar, :root.dark .toolbar, :root.dark .status, :root.dark .read .hdr, :root.dark .split .divider,
+:root.dark .menu, :root.dark .modal, :root.dark input, :root.dark select, :root.dark textarea, :root.dark .read .att, :root.dark .settings .acct, :root.dark .onboard .steps, :root.dark .rich .tb { background: var(--panel); color: var(--text); }
+:root.dark button:hover:not(:disabled) { background: #3a3b40; } :root.dark .tree .item:hover { background: #2d3036; }
+:root.dark .row .lab, :root.dark code { background: #3a3b40; color: #ccc; } :root.dark .read .hdr .labs span { background: #2e3b52; color: #bcd0f0; }
+:root.dark .read .imgbar { background: #3d3520; border-color: #6b5b26; color: #e6e6e6; } :root.dark .tabs .tab.active { color: var(--accent); }
+:root.dark .toolbar button .ico { color: #bbb; } :root.dark .toolbar button:disabled .ico { color: #555; } :root.dark button:disabled { color: #666; }
+:root.dark .row.sel, :root.dark .tree .item.active { color: #fff; }
 
 /* ── search filters ── */
 .chips { display: flex; gap: 6px; padding: 4px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; align-items: center; font-size: 12px; }
@@ -207,15 +204,15 @@ a { color: var(--accent); }
 .thread .card .cactions { display: flex; gap: 4px; padding: 4px 8px; border-top: 1px solid var(--border); }
 .thread .card .cactions button { font-size: 12px; }
 .row .tcount { background: #e3e3e3; color: #444; border-radius: 9px; padding: 0 6px; font-size: 10px; margin-left: 6px; }
-:root[data-theme="dark"] .row .tcount { background: #3a3b40; color: #ccc; }
+:root.dark .row .tcount { background: #3a3b40; color: #ccc; }
 .row .reply-ico { color: var(--muted); margin-right: 4px; }
 
 /* ── calendar invite card ── */
 .invite { margin: 10px 16px; border: 1px solid #b7cff2; background: #eef4fd; border-radius: 8px; padding: 10px 14px; display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; color: #1c2a44; }
-:root[data-theme="dark"] .invite { background: #2b3550; border-color: #3f5482; color: #dce6fb; }
+:root.dark .invite { background: #2b3550; border-color: #3f5482; color: #dce6fb; }
 .invite .title { font-weight: 600; font-size: 14px; } .invite .line { font-size: 12px; margin-top: 2px; }
 .invite .btns { display: flex; gap: 6px; align-items: flex-start; } .invite .btns button { border: 1px solid #b7cff2; background: #fff; }
-:root[data-theme="dark"] .invite .btns button { background: #1e1f22; border-color: #3f5482; }
+:root.dark .invite .btns button { background: #1e1f22; border-color: #3f5482; }
 .invite .btns button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .invite .resp { font-size: 12px; font-weight: 600; }
 
@@ -241,3 +238,12 @@ a { color: var(--accent); }
 .rules .cond, .rules .act { display: flex; gap: 6px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
 .rules .cond select, .rules .act select { width: auto; } .rules .cond input { flex: 1; min-width: 160px; }
 .rules .sub { color: var(--muted); font-size: 12px; }
+
+:root.dark .read .imgbar, :root.dark .thread .card .imgbar { background: #3d3520; border-color: #6b5b26; color: #f1e6c8; }
+:root.dark .read .imgbar button, :root.dark .thread .card .imgbar button { color: #fff; border-color: #8a7a3a; }
+:root.dark .rich .ed { background: var(--panel); color: var(--text); }
+:root.dark .compose .quote { color: #bbb; border-color: #555; }
+:root.dark .chips .chip { background: var(--accent-bg); color: #bcd0f0; }
+:root.dark .rules .rule { background: var(--panel); }
+:root.dark .empty .big { color: #555; }
+:root.dark .grp { color: #bbb; }
