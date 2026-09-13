@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS messages (
   imap_folder TEXT,
   imap_uid INTEGER,
   calendar_json TEXT,
+  auth_json TEXT,
   UNIQUE (account_id, id)
 );
 CREATE INDEX IF NOT EXISTS messages_msgid ON messages(account_id, message_id_hdr);
@@ -133,6 +134,16 @@ CREATE TABLE IF NOT EXISTS contacts (
   last_used INTEGER NOT NULL DEFAULT 0,
   source TEXT
 );
+CREATE TABLE IF NOT EXISTS followups (
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER NOT NULL,
+  message_id TEXT, thread_id TEXT, message_id_hdr TEXT,
+  subject TEXT, to_text TEXT,
+  due_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'waiting',
+  replied_by TEXT, replied_at INTEGER, notified INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY,
   account_id INTEGER NOT NULL,
@@ -173,7 +184,7 @@ class MailDb {
     add('accounts', 'kind', "TEXT NOT NULL DEFAULT 'gmail'"); add('accounts', 'imap_json', 'TEXT'); add('accounts', 'signature', 'TEXT'); add('accounts', 'scopes', 'TEXT');
     add('labels', 'imap_path', 'TEXT');
     add('messages', 'answered', 'INTEGER NOT NULL DEFAULT 0'); add('messages', 'calendar_json', 'TEXT');
-    add('drafts', 'remote_message_id', 'TEXT'); add('contacts', 'source', 'TEXT'); add('messages', 'imap_folder', 'TEXT'); add('messages', 'imap_uid', 'INTEGER');
+    add('drafts', 'remote_message_id', 'TEXT'); add('contacts', 'source', 'TEXT'); add('messages', 'auth_json', 'TEXT'); add('messages', 'imap_folder', 'TEXT'); add('messages', 'imap_uid', 'INTEGER');
   }
   prep(sql) {
     let s = this._stmts.get(sql);
@@ -281,6 +292,47 @@ class MailDb {
     return this.listRules().find(x => x.id === Number(res.lastInsertRowid));
   }
   deleteRule(id) { this.prep('DELETE FROM rules WHERE id = ?').run(id); }
+  // ── follow-ups (remind me if no reply) ──
+  addFollowup(f) {
+    const r = this.prep('INSERT INTO followups (account_id, message_id, thread_id, message_id_hdr, subject, to_text, due_at, created_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(f.accountId, f.messageId || null, f.threadId || null, f.messageIdHdr || null, f.subject || '', f.to || '', f.dueAt, Date.now());
+    return Number(r.lastInsertRowid);
+  }
+  listFollowups() { return this.prep("SELECT * FROM followups WHERE status IN ('waiting','due') ORDER BY due_at").all().map(rowToFollowup); }
+  getFollowup(id) { const r = this.prep('SELECT * FROM followups WHERE id = ?').get(id); return r ? rowToFollowup(r) : null; }
+  updateFollowup(id, fields) { const k = Object.keys(fields); if (!k.length) return; this.prep(`UPDATE followups SET ${k.map(x => `${x} = ?`).join(', ')} WHERE id = ?`).run(...k.map(x => fields[x]), id); }
+  deleteFollowup(id) { this.prep('DELETE FROM followups WHERE id = ?').run(id); }
+  /** Has anyone other than `ownEmails` written in this thread since `since`? Returns the reply row or null. */
+  replyInThread(accountId, { threadId, messageIdHdr }, since, ownEmails) {
+    const rows = threadId ? this.prep('SELECT * FROM messages WHERE account_id = ? AND thread_id = ? AND internal_date > ? ORDER BY internal_date').all(accountId, threadId, since) : [];
+    const more = messageIdHdr ? this.prep("SELECT * FROM messages WHERE account_id = ? AND internal_date > ? AND (in_reply_to = ? OR instr(coalesce(references_hdr,''), ?) > 0)").all(accountId, since, messageIdHdr, messageIdHdr) : [];
+    const own = new Set(ownEmails.map(e => e.toLowerCase()));
+    for (const r of [...rows, ...more]) { const m = rowToMessage(r); if (m.fromEmail && !own.has(m.fromEmail.toLowerCase()) && !m.labels.includes('SENT') && !m.labels.includes('DRAFT')) return m; }
+    return null;
+  }
+  // ── sender intelligence ──
+  senderInfo(email, ownEmails = []) {
+    const e = String(email || '').toLowerCase();
+    if (!e) return null;
+    const own = new Set(ownEmails.map(x => x.toLowerCase()));
+    const recv = this.prep(`SELECT count(*) AS n, min(internal_date) AS first, max(internal_date) AS last, sum(has_attachment) AS atts, sum(unread) AS unread
+      FROM messages WHERE lower(from_email) = ? AND NOT EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id = messages.account_id AND x.message_id = messages.id AND x.label_id IN ('SENT','DRAFT'))`).get(e);
+    const sent = this.prep(`SELECT count(*) AS n, max(internal_date) AS last FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id AND ml.label_id = 'SENT'
+      WHERE lower(m.to_json) LIKE ? OR lower(m.cc_json) LIKE ?`).get('%"' + e + '"%', '%"' + e + '"%');
+    const recent = this.prep(`SELECT account_id, id, thread_id, subject, internal_date, unread FROM messages WHERE lower(from_email) = ? ORDER BY internal_date DESC LIMIT 6`).all(e)
+      .map(r => ({ accountId: r.account_id, id: r.id, threadId: r.thread_id, subject: r.subject, date: r.internal_date, unread: !!r.unread }));
+    // response time: for each of their messages, our next SENT message in the same thread
+    const pairs = this.prep(`SELECT m.internal_date AS theirs, (SELECT min(s.internal_date) FROM messages s JOIN message_labels sl ON sl.account_id = s.account_id AND sl.message_id = s.id AND sl.label_id = 'SENT'
+        WHERE s.account_id = m.account_id AND s.thread_id = m.thread_id AND s.internal_date > m.internal_date) AS ours
+      FROM messages m WHERE lower(m.from_email) = ? AND m.thread_id IS NOT NULL ORDER BY m.internal_date DESC LIMIT 50`).all(e).filter(p => p.ours);
+    const avgReplyMs = pairs.length ? pairs.reduce((a, p) => a + (p.ours - p.theirs), 0) / pairs.length : null;
+    const labels = this.prep(`SELECT ml.label_id AS l, count(*) AS n FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id
+      WHERE lower(m.from_email) = ? AND ml.label_id NOT IN ('INBOX','UNREAD','STARRED','IMPORTANT','SENT','DRAFT','TRASH','SPAM','ARCHIVE') AND ml.label_id NOT LIKE 'CATEGORY_%' GROUP BY ml.label_id ORDER BY n DESC LIMIT 3`).all(e);
+    const spam = this.prep(`SELECT count(*) AS n FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id AND ml.label_id = 'SPAM' WHERE lower(m.from_email) = ?`).get(e).n;
+    const contact = this.prep('SELECT name, source FROM contacts WHERE email = ?').get(e);
+    return { email: e, received: recv.n, firstSeen: recv.first, lastSeen: recv.last, attachments: recv.atts || 0, unread: recv.unread || 0, sentTo: sent.n, lastSentAt: sent.last,
+      repliedCount: pairs.length, avgReplyMs, labels: labels.map(x => x.l), spam, inContacts: !!contact, contactSource: contact?.source || null, isOwn: own.has(e), recent };
+  }
   // ── outbox (messages waiting for a connection) ──
   enqueueOutbox(accountId, payload, err) {
     const r = this.prep('INSERT INTO outbox (account_id, payload_json, subject, to_text, attempts, last_error, next_try, created_at) VALUES (?,?,?,?,?,?,?,?)')
@@ -324,8 +376,8 @@ class MailDb {
   upsertMessages(accountId, rows) {
     const ins = this.prep(`INSERT INTO messages (account_id, id, thread_id, history_id, internal_date, size, snippet, subject,
         from_name, from_email, to_json, cc_json, reply_to, message_id_hdr, in_reply_to, references_hdr, has_attachment,
-        unread, starred, labels_json, answered, imap_folder, imap_uid)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        unread, starred, labels_json, answered, imap_folder, imap_uid, auth_json)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(account_id, id) DO UPDATE SET
         thread_id=excluded.thread_id, history_id=excluded.history_id, internal_date=excluded.internal_date,
         size=excluded.size, snippet=excluded.snippet, subject=excluded.subject, from_name=excluded.from_name,
@@ -333,7 +385,7 @@ class MailDb {
         message_id_hdr=excluded.message_id_hdr, in_reply_to=excluded.in_reply_to, references_hdr=excluded.references_hdr,
         has_attachment=max(messages.has_attachment, excluded.has_attachment),
         unread=excluded.unread, starred=excluded.starred, labels_json=excluded.labels_json, answered=excluded.answered,
-        imap_folder=excluded.imap_folder, imap_uid=excluded.imap_uid`);
+        imap_folder=excluded.imap_folder, imap_uid=excluded.imap_uid, auth_json=coalesce(excluded.auth_json, messages.auth_json)`);
     const delL = this.prep('DELETE FROM message_labels WHERE account_id = ? AND message_id = ?');
     const insL = this.prep('INSERT OR IGNORE INTO message_labels (account_id, message_id, label_id) VALUES (?,?,?)');
     this.tx(() => {
@@ -343,7 +395,7 @@ class MailDb {
           JSON.stringify(m.to || []), JSON.stringify(m.cc || []), m.replyTo || null,
           m.messageIdHdr || null, m.inReplyTo || null, m.references || null, m.hasAttachment ? 1 : 0,
           m.labels.includes('UNREAD') ? 1 : 0, m.labels.includes('STARRED') ? 1 : 0, JSON.stringify(m.labels), m.answered ? 1 : 0,
-          m.imapFolder || null, m.imapUid ?? null);
+          m.imapFolder || null, m.imapUid ?? null, m.auth ? JSON.stringify(m.auth) : null);
         delL.run(accountId, m.id);
         for (const l of m.labels) insL.run(accountId, m.id, l);
         if (m.snoozeUntil) this.adoptSnooze(accountId, m.id, m.snoozeUntil);
@@ -622,6 +674,7 @@ function rowToListItem(r) {
   };
 }
 function rowToRule(r) { return { id: r.id, name: r.name, enabled: !!r.enabled, accountId: r.account_id, position: r.position, match: r.match, conditions: safeJson(r.conditions_json, []), actions: safeJson(r.actions_json, []) }; }
+function rowToFollowup(r) { return { id: r.id, accountId: r.account_id, messageId: r.message_id, threadId: r.thread_id, messageIdHdr: r.message_id_hdr, subject: r.subject, to: r.to_text, dueAt: r.due_at, createdAt: r.created_at, status: r.status, repliedBy: r.replied_by, repliedAt: r.replied_at, notified: !!r.notified }; }
 function rowToDraft(r) {
   return { id: r.id, accountId: r.account_id, mode: r.mode, replyTo: r.reply_message_id ? { accountId: r.reply_account_id, id: r.reply_message_id } : null,
     to: r.to_text || '', cc: r.cc_text || '', bcc: r.bcc_text || '', subject: r.subject || '', bodyHtml: r.body_html || '', bodyText: r.body_text || '',
@@ -635,7 +688,7 @@ function publicImap(json) {
 function rowToMessage(r) {
   return {
     ...rowToListItem(r), cc: safeJson(r.cc_json, []), replyTo: r.reply_to, messageIdHdr: r.message_id_hdr,
-    inReplyTo: r.in_reply_to, references: r.references_hdr, bodyFetched: !!r.body_fetched, calendar: safeJson(r.calendar_json, null),
+    inReplyTo: r.in_reply_to, references: r.references_hdr, bodyFetched: !!r.body_fetched, calendar: safeJson(r.calendar_json, null), auth: safeJson(r.auth_json, null),
     bodyText: r.body_text, bodyHtml: r.body_html, attachments: safeJson(r.attachments_json, []),
   };
 }

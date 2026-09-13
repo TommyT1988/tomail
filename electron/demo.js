@@ -56,7 +56,9 @@ function seedDemo(db) {
   for (let i = 0; i < 3; i++) msgs.push({ id: 'demothr' + i, threadId: 'ththr', historyId: '1', internalDate: t(14 + i, 10, 2 - i), size: 3000 + i, snippet: 'Re: Quote for 20 laptops', subject: (i ? 'Re: ' : '') + 'Quote for 20 laptops',
     fromName: i % 2 ? 'Alex' : 'Jordan Lee', fromEmail: i % 2 ? 'alex@example.com' : 'jordan@example.org', to: [{ name: '', email: i % 2 ? 'jordan@example.org' : 'alex@example.com' }], cc: [], hasAttachment: false,
     labels: i % 2 ? ['SENT'] : ['INBOX'], messageIdHdr: `<thr${i}@example>`, inReplyTo: i ? `<thr${i - 1}@example>` : null });
+  for (const m of msgs) m.auth = m.fromEmail.endsWith('example.ru') ? { spf: 'fail', dkim: 'fail', dmarc: 'fail' } : { spf: 'pass', dkim: 'pass', dmarc: 'pass' };
   db.upsertMessages(a1.id, msgs);
+  db.addFollowup({ accountId: a1.id, messageId: 'demothr1', threadId: 'ththr', messageIdHdr: '<thr1@example>', subject: 'Re: Quote for 20 laptops', to: 'jordan@example.org', dueAt: Date.now() - 3600000 });
   const inv = new Date(); inv.setDate(inv.getDate() + 3); inv.setHours(10, 0, 0, 0);
   db.setCalendar(a1.id, 'demoinv', { uid: 'inv-1', summary: 'Supplier review', location: 'Meeting room 2', start: { ts: inv.getTime(), allDay: false }, end: { ts: inv.getTime() + 3600000, allDay: false },
     organizer: { name: 'Sam Wood', email: 'sam@example.com' }, attendees: [{ name: 'Alex', email: 'alex@example.com', partstat: 'NEEDS-ACTION' }], method: 'REQUEST', sequence: 0 });

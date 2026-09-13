@@ -162,8 +162,9 @@ class Actions {
       const orig = this.db.getMessage(opts.replyTo.accountId, opts.replyTo.id);
       for (const a of orig?.attachments || []) { if (a.attachmentId == null) continue; attachments.push({ filename: a.filename, contentType: a.mimeType, content: await this.getAttachment(opts.replyTo.accountId, opts.replyTo.id, a.attachmentId) }); }
     }
-    const raw = await buildRaw({ from: this.fromHeader(acct), to: opts.to, cc: opts.cc, bcc: opts.bcc, subject: opts.subject, text, html, attachments, inReplyTo, references, icalEvent: opts.icalEvent });
-    return { raw, threadId };
+    const messageId = `<${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 10)}@${acct.email.split('@')[1] || 'tomail'}>`;
+    const raw = await buildRaw({ from: this.fromHeader(acct), to: opts.to, cc: opts.cc, bcc: opts.bcc, subject: opts.subject, text, html, attachments, inReplyTo, references, icalEvent: opts.icalEvent, messageId });
+    return { raw, threadId, messageId };
   }
   isNetworkError(e) { return /fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|socket hang up|network|Connection not available|timed out/i.test(e?.message || '') || /^(ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN)/.test(e?.code || ''); }
   /** Send now; on a connection failure the message goes to the Outbox and is retried automatically. */
@@ -196,9 +197,10 @@ class Actions {
   async sendNow(opts) {
     const acct = this.db.getAccount(opts.accountId);
     if (!acct) throw new Error('Unknown account');
-    const { raw, threadId } = await this.buildOutgoing(opts, acct);
+    const { raw, threadId, messageId } = await this.buildOutgoing(opts, acct);
     const p = this.providers(opts.accountId);
     const sent = await p.send({ raw, threadId });
+    if (opts.followUpAt) this.db.addFollowup({ accountId: opts.accountId, messageId: sent.id, threadId: sent.threadId || threadId || null, messageIdHdr: messageId, subject: opts.subject, to: opts.to, dueAt: Number(opts.followUpAt) });
     if (opts.replyTo && opts.mode !== 'forward' && p.kind === 'imap') {
       try { await p.modify([opts.replyTo.id], { add: ['ANSWERED'] }); } catch {}
       this.db.prep('UPDATE messages SET answered = 1 WHERE account_id = ? AND id = ?').run(opts.replyTo.accountId, opts.replyTo.id);
@@ -211,6 +213,26 @@ class Actions {
   async renameLabel(accountId, id, name) { await this.providers(accountId).renameLabel(id, name); this.onChange(); }
   async deleteLabel(accountId, id) { await this.providers(accountId).deleteLabel(id); this.onChange(); }
   async setLabelColor(accountId, id, bg, fg) { await this.providers(accountId).setLabelColor(id, bg, fg); this.onChange(); }
+
+  // ── follow-ups ──
+  ownEmails() { return this.db.listAccounts().map(a => a.email); }
+  addFollowup(accountId, messageId, dueAt) {
+    const m = this.db.getMessage(accountId, messageId); if (!m) throw new Error('Message not found');
+    const id = this.db.addFollowup({ accountId, messageId, threadId: m.threadId, messageIdHdr: m.messageIdHdr, subject: m.subject, to: (m.to || []).map(a => a.email).join(', ') || m.fromEmail, dueAt });
+    this.onChange(); return this.db.getFollowup(id);
+  }
+  /** Resolve follow-ups that got a reply; mark overdue ones due. Returns the newly-due list. */
+  checkFollowups() {
+    const own = this.ownEmails(); const newlyDue = [];
+    for (const f of this.db.listFollowups()) {
+      const reply = this.db.replyInThread(f.accountId, f, f.createdAt, own);
+      if (reply) { this.db.updateFollowup(f.id, { status: 'replied', replied_by: reply.fromEmail, replied_at: reply.date }); continue; }
+      if (f.status === 'waiting' && Date.now() >= f.dueAt) { this.db.updateFollowup(f.id, { status: 'due' }); newlyDue.push({ ...f, status: 'due' }); }
+    }
+    if (newlyDue.length) this.onChange();
+    return newlyDue;
+  }
+  markFollowupNotified(id) { this.db.updateFollowup(id, { notified: 1 }); }
 
   // ── drafts (local first; mirrored to the provider's Drafts best-effort) ──
   listDrafts() { return this.db.listDrafts(); }

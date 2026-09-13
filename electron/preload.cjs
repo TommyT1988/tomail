@@ -17,7 +17,7 @@ const api = {
     list: (view, page) => call('messages:list', view, page), count: (view) => call('messages:count', view),
     get: (accountId, id) => call('messages:get', accountId, id), counts: () => call('messages:counts'),
     deepSearch: (q, accountId) => call('messages:deepSearch', q, accountId), thread: (accountId, threadId, opts) => call('messages:thread', accountId, threadId, opts),
-    print: (accountId, id) => call('messages:print', accountId, id), openWindow: (accountId, id) => call('messages:openWindow', accountId, id),
+    print: (accountId, id) => call('messages:print', accountId, id), openWindow: (accountId, id) => call('messages:openWindow', accountId, id), senderInfo: (email) => call('messages:senderInfo', email),
   },
   actions: {
     markRead: (t, read) => call('actions:markRead', t, read), star: (t, on) => call('actions:star', t, on),
@@ -36,6 +36,7 @@ const api = {
   shell: { openExternal: (url) => call('shell:openExternal', url) },
   app: { info: () => call('app:info'), installUpdate: () => call('app:installUpdate'), setBadge: (count, dataUrl) => call('app:setBadge', count, dataUrl), openLogs: () => call('app:openLogs'), reportProblem: (d) => call('app:reportProblem', d), dbInfo: () => call('app:dbInfo'), compactDb: () => call('app:compactDb') },
   send: { queue: (p) => call('send:queue', p), cancel: (id) => call('send:cancel', id) },
+  followups: { list: () => call('followups:list'), add: (a, m, due) => call('followups:add', a, m, due), update: (id, f) => call('followups:update', id, f), remove: (id) => call('followups:remove', id) },
   outbox: { list: () => call('outbox:list'), sendNow: (id) => call('outbox:sendNow', id), remove: (id) => call('outbox:remove', id) },
   on: (event, cb) => { const h = (_e, payload) => cb(payload); ipcRenderer.on(event, h); return () => ipcRenderer.removeListener(event, h); },
 };

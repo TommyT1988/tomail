@@ -4,7 +4,7 @@ import MessageList from './components/MessageList.jsx';
 import ReadingPane from './components/ReadingPane.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import { Dropdown, MI, MarkMenu, QuickActionsMenu, SnoozeMenu, FilterMenu } from './components/Menus.jsx';
-import { ago, gmailQuery, keyOf, sameView, parseSearch } from './util.js';
+import { ago, gmailQuery, keyOf, sameView, parseSearch, followUpPresets } from './util.js';
 import Icon from './components/Icons.jsx';
 
 const PAGE = 100;
@@ -45,6 +45,7 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState(null);
   const [sendState, setSendState] = useState(null);
   const [outbox, setOutbox] = useState([]);
+  const [followups, setFollowups] = useState([]);
   const [labelMenu, setLabelMenu] = useState(null);
   const [shortcuts, setShortcuts] = useState(false);
   const undoRef = useRef(null);
@@ -71,8 +72,8 @@ export default function App() {
 
   // ── loaders ──
   const loadMeta = useCallback(async () => {
-    const [accs, c, st, d, ob] = await Promise.all([mail.accounts.list(), mail.messages.counts(), mail.sync.status(), mail.drafts.list(), mail.outbox.list()]);
-    setAccounts(accs); setCounts(c); setStatus(st); setDrafts(d); setOutbox(ob);
+    const [accs, c, st, d, ob, fu] = await Promise.all([mail.accounts.list(), mail.messages.counts(), mail.sync.status(), mail.drafts.list(), mail.outbox.list(), mail.followups.list()]);
+    setAccounts(accs); setCounts(c); setStatus(st); setDrafts(d); setOutbox(ob); setFollowups(fu);
     const ls = {}; await Promise.all(accs.map(async a => { ls[a.id] = await mail.labels.list(a.id); })); setLabels(ls);
     const unread = c?.favourites?.inboxUnread || 0;
     mail.app.setBadge(unread, unread > 0 ? drawBadge(unread) : null).catch(() => {});
@@ -84,6 +85,7 @@ export default function App() {
   }, []);
   const loadList = useCallback(async (v, { append = false } = {}) => {
     if (v.kind === 'drafts') { const d = await mail.drafts.list(); setDrafts(d); const it = draftItems(v, d); setItems(it); setTotal(it.length); setHasMore(false); return; }
+    if (v.kind === 'followups') { const fu = await mail.followups.list(); setFollowups(fu); const it = fu.map(f => ({ accountId: f.accountId, id: 'fu:' + f.id, followup: f, isFollowup: true, subject: f.subject, toText: f.to, fromName: f.status === 'due' ? 'No reply yet' : 'Waiting for reply', fromEmail: '', snippet: `sent ${new Date(f.createdAt).toLocaleDateString('en-GB')} · reminder ${new Date(f.dueAt).toLocaleDateString('en-GB')}`, date: f.dueAt, size: 0, labels: [], to: [], unread: f.status === 'due', starred: false })); setItems(it); setTotal(it.length); setHasMore(false); return; }
     if (v.kind === 'outbox') { const ob = await mail.outbox.list(); setOutbox(ob); const it = ob.map(o => ({ accountId: o.accountId, id: 'outbox:' + o.id, outboxId: o.id, isOutbox: true, subject: o.subject, toText: o.to, snippet: o.lastError || '', fromName: 'Outbox', fromEmail: '', date: o.createdAt, size: 0, labels: [], to: [], unread: false, starred: false })); setItems(it); setTotal(it.length); setHasMore(false); return; }
     setLoading(true);
     try {
@@ -105,17 +107,18 @@ export default function App() {
     const off2 = mail.on('sync:status', (s) => setStatus(s));
     const off3 = mail.on('app:update-ready', (u) => setUpdateReady(u));
     const off4 = mail.on('app:open-message', ({ accountId, id }) => { setView(HOME); setTimeout(() => setSelected([{ accountId, id }]), 300); });
+    const off6 = mail.on('app:open-followups', () => setView({ kind: 'followups' }));
     const off5 = mail.on('send:state', (s) => { if (s.state === 'pending' || s.state === 'sending') setSendState(s); else { setSendState(null); if (s.state === 'sent') toast('Message sent'); else if (s.state === 'outbox') toast(s.error); else if (s.state === 'failed') toast('Send failed: ' + s.error + (s.draftId ? ' — the draft is kept' : ''), true); } loadMeta(); });
     const mq = window.matchMedia('(prefers-color-scheme: dark)'); const onMq = () => { mail.settings.get().then(s => applyTheme(s.prefs.theme)); tick(x => x + 1); }; mq.addEventListener('change', onMq);
     const t = setInterval(() => tick(x => x + 1), 30000);
-    return () => { off1(); off2(); off3(); off4(); off5(); clearInterval(t); mq.removeEventListener('change', onMq); };
+    return () => { off1(); off2(); off3(); off4(); off5(); off6(); clearInterval(t); mq.removeEventListener('change', onMq); };
   }, [loadMeta, loadList, setView]);
   useEffect(() => { if (!settingsOpen) mail.settings.get().then(s => { setPrefs(s.prefs); applyTheme(s.prefs.theme); }); }, [settingsOpen]);
 
   // ── open message / thread ──
   const openMessage = useCallback(async (m) => {
     if (!m) { setMessage(null); setThread(null); return; }
-    if (m.isDraft) { setMessage(null); setThread(null); return; }
+    if (m.isDraft || m.isFollowup || m.isOutbox) { setMessage(null); setThread(null); return; }
     setMsgError(null); setMsgLoading(true);
     setMessage({ ...m, bodyFetched: false }); setThread(null);
     try {
@@ -145,6 +148,7 @@ export default function App() {
   const curIndex = () => { const s = selected[selected.length - 1]; return s ? itemsRef.current.findIndex(i => i.id === s.id && i.accountId === s.accountId) : -1; };
   const openItem = async (m) => {
     if (!m) return;
+    if (m.isFollowup) { const f = m.followup; if (f.messageId) { setView({ kind: 'all', accountId: f.accountId }); setTimeout(() => setSelected([{ accountId: f.accountId, id: f.messageId }]), 300); } return; }
     if (m.isOutbox) { try { await mail.outbox.sendNow(m.outboxId); toast('Sent'); loadList(view); } catch (e) { toast(e.message, true); } return; }
     if (!m.isDraft) { openCompose('reply', m); return; }   // double-click a message = reply
     if (m.remoteDraft) { try { const d = await mail.drafts.openRemote(m.accountId, m.id); mail.compose.open({ mode: 'new', accountId: m.accountId, draftId: d.id }); } catch (e) { toast(e.message, true); } }
@@ -270,7 +274,7 @@ export default function App() {
         <button disabled={!hasSel} onClick={doTrash} title={inTrash ? 'Delete permanently' : 'Move to Trash'}><span className="ico"><Icon name="trash" /></span>{inTrash ? 'Delete forever' : 'Delete'}</button>
       </div>
       <div className={'body' + (sidebarOpen ? '' : ' nosidebar')}>
-        {sidebarOpen && <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} onReorder={(ids) => mail.accounts.reorder(ids).then(loadMeta)} outboxCount={outbox.length} onLabelMenu={(e, accountId, l) => setLabelMenu({ x: e.clientX, y: e.clientY, accountId, label: l })} />}
+        {sidebarOpen && <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} onReorder={(ids) => mail.accounts.reorder(ids).then(loadMeta)} outboxCount={outbox.length} followups={{ total: followups.length, due: followups.filter(f => f.status === 'due').length }} onLabelMenu={(e, accountId, l) => setLabelMenu({ x: e.clientX, y: e.clientY, accountId, label: l })} />}
         <div className="main">
           {!accounts.length && info && !info.demo ? (
             <div className="onboard">
@@ -293,11 +297,25 @@ export default function App() {
               </div>
               <div className="divider" onMouseDown={startDrag} />
               <div className="read-wrap">
-                {view.kind === 'outbox' && selected.length === 1 ? <div className="read"><div className="empty"><div className="big"><Icon name="send" size={56} style={{ strokeWidth: 1 }} /></div><div>Waiting for a connection{itemsRef.current.find(i => i.id === selected[0].id)?.snippet ? ': ' + itemsRef.current.find(i => i.id === selected[0].id).snippet : ''}</div><div><button className="primary" onClick={() => openItem(itemsRef.current.find(i => i.id === selected[0].id))}>Send now</button> <button onClick={() => { const it = itemsRef.current.find(i => i.id === selected[0].id); mail.outbox.remove(it.outboxId).then(() => loadList(view)); }}>Delete</button></div></div></div>
+                {view.kind === 'followups' && selected.length === 1 ? (() => { const it = itemsRef.current.find(i => i.id === selected[0].id); const f = it?.followup; if (!f) return null; return (
+                  <div className="read"><div className="fu-detail">
+                    <h2>{f.subject || '(no subject)'}</h2>
+                    <p>Sent to <b>{f.to}</b> on {new Date(f.createdAt).toLocaleString('en-GB')}. {f.status === 'due' ? <span style={{ color: '#c0392b', fontWeight: 600 }}>No reply by {new Date(f.dueAt).toLocaleDateString('en-GB')}.</span> : <>Reminder on {new Date(f.dueAt).toLocaleString('en-GB')} if nobody replies.</>}</p>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {f.messageId && <button className="primary" onClick={() => openItem(it)}>Open the message</button>}
+                      {f.messageId && <button onClick={async () => { const m = await mail.messages.get(f.accountId, f.messageId).catch(() => null); if (m) mail.compose.open({ mode: 'replyAll', accountId: f.accountId, originalId: f.messageId, subject: m.subject }); }}>Chase (reply all)</button>}
+                      <Dropdown label="Remind me later"><div className="mhead">New reminder</div>{followUpPresets().map(p => <MI key={p.label} sub={new Date(p.at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} onClick={() => mail.followups.update(f.id, { dueAt: p.at }).then(() => { toast('Reminder moved'); loadList(view); })}>{p.label}</MI>)}</Dropdown>
+                      <button onClick={() => mail.followups.update(f.id, { status: 'done' }).then(() => { toast('Done'); setSelected([]); loadList(view); loadMeta(); })}>Done</button>
+                      <button onClick={() => mail.followups.remove(f.id).then(() => { setSelected([]); loadList(view); loadMeta(); })}>Remove</button>
+                    </div>
+                  </div></div>); })()
+                  : view.kind === 'outbox' && selected.length === 1 ? <div className="read"><div className="empty"><div className="big"><Icon name="send" size={56} style={{ strokeWidth: 1 }} /></div><div>Waiting for a connection{itemsRef.current.find(i => i.id === selected[0].id)?.snippet ? ': ' + itemsRef.current.find(i => i.id === selected[0].id).snippet : ''}</div><div><button className="primary" onClick={() => openItem(itemsRef.current.find(i => i.id === selected[0].id))}>Send now</button> <button onClick={() => { const it = itemsRef.current.find(i => i.id === selected[0].id); mail.outbox.remove(it.outboxId).then(() => loadList(view)); }}>Delete</button></div></div></div>
                   : view.kind === 'drafts' && selected.length === 1 ? <div className="read"><div className="empty"><div className="big"><Icon name="edit" size={56} style={{ strokeWidth: 1 }} /></div><div><button className="primary" onClick={() => openItem(itemsRef.current.find(i => i.id === selected[0].id))}>Open draft</button> <button onClick={() => { const it = itemsRef.current.find(i => i.id === selected[0].id); if (it?.draftId) mail.drafts.remove(it.draftId).then(() => loadList(view)); else if (it?.remoteDraft) mail.actions.trash([{ accountId: it.accountId, id: it.id }]); }}>Delete</button></div></div></div>
                   : <ReadingPane message={message} thread={thread} loading={msgLoading} prefs={prefs} error={msgError}
                     onRespond={async (m, p) => { try { await mail.actions.respondInvite(m.accountId, m.id, p); toast('Reply sent to the organiser'); const full = await mail.messages.get(m.accountId, m.id); setMessage(cur => cur?.id === m.id ? full : cur); } catch (e) { toast(e.message, true); } }}
-                    onPrint={(m) => mail.messages.print(m.accountId, m.id).catch(e => toast(e.message, true))} onReplyTo={(m, mode) => openCompose(mode, m)} onPopOut={(m) => mail.messages.openWindow(m.accountId, m.id)} />}
+                    onPrint={(m) => mail.messages.print(m.accountId, m.id).catch(e => toast(e.message, true))} onReplyTo={(m, mode) => openCompose(mode, m)} onPopOut={(m) => mail.messages.openWindow(m.accountId, m.id)} toast={toast}
+                    onOpenMessage={(r) => { setView({ kind: 'all', accountId: r.accountId }); setTimeout(() => setSelected([{ accountId: r.accountId, id: r.id }]), 300); }}
+                    onRuleFromSender={(m) => { setRuleSeed({ accountId: m.accountId, name: `From ${m.fromName || m.fromEmail}`, conditions: [{ field: 'from', op: 'contains', value: m.fromEmail }], actions: [{ type: 'moveTo', labelId: '' }] }); setSettingsOpen('rules'); }} />}
               </div>
             </div>
           )}

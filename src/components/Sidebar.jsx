@@ -13,7 +13,7 @@ function Item({ active, onClick, onContextMenu, icon, name, count, unread, inden
   );
 }
 
-export default function Sidebar({ accounts, labels, counts, view, setView, status, draftCounts, onReorder, onLabelMenu, outboxCount }) {
+export default function Sidebar({ accounts, labels, counts, view, setView, status, draftCounts, onReorder, onLabelMenu, outboxCount, followups }) {
   const [collapsed, setCollapsed] = useState({});
   const [dragId, setDragId] = useState(null);
   const [overId, setOverId] = useState(null);
@@ -50,6 +50,7 @@ export default function Sidebar({ accounts, labels, counts, view, setView, statu
           <Item indent={1} icon="flag" name="Flagged" count={fav.starred} active={isView({ kind: 'starred' })} onClick={() => setView({ kind: 'starred' })} />
           <Item indent={1} icon="clock" name="Snoozed" count={fav.snoozed} active={isView({ kind: 'snoozed' })} onClick={() => setView({ kind: 'snoozed' })} />
           <Item indent={1} icon="edit" name="Drafts" count={draftCounts?.all || 0} active={isView({ kind: 'drafts' })} onClick={() => setView({ kind: 'drafts' })} />
+          {(followups?.total > 0) && <Item indent={1} icon="clock" name="Follow-ups" count={followups.due} unread active={isView({ kind: 'followups' })} onClick={() => setView({ kind: 'followups' })} />}
           {outboxCount > 0 && <Item indent={1} icon="send" name="Outbox" count={outboxCount} unread active={isView({ kind: 'outbox' })} onClick={() => setView({ kind: 'outbox' })} />}
         </>}
         {accounts.map(a => {

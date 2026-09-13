@@ -131,3 +131,10 @@ export function parseSearch(q, labels = []) {
   }
   return { text: rest.join(' ').trim(), filters };
 }
+
+export function followUpPresets() {
+  const at = (days, h = 9) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(h, 0, 0, 0); return d.getTime(); };
+  const nextWorking = () => { const d = new Date(); do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6); d.setHours(9, 0, 0, 0); return d.getTime(); };
+  return [{ label: 'Tomorrow', at: at(1) }, { label: 'Next working day', at: nextWorking() }, { label: 'In 3 days', at: at(3) }, { label: 'In a week', at: at(7) }, { label: 'In 2 weeks', at: at(14) }];
+}
+export function fmtDuration(ms) { if (ms == null) return ''; const h = ms / 3600000; if (h < 1) return `${Math.max(1, Math.round(ms / 60000))} min`; if (h < 48) return `${Math.round(h)} h`; return `${Math.round(h / 24)} days`; }

@@ -7,6 +7,7 @@ const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const nodemailer = require('nodemailer');
 const { htmlToText } = require('../gmail/mime');
+const { parseAuthResults } = require('../authResults');
 
 const SPECIAL = { '\\Inbox': 'INBOX', '\\Sent': 'SENT', '\\Trash': 'TRASH', '\\Junk': 'SPAM', '\\Drafts': 'DRAFT', '\\Archive': 'ARCHIVE', '\\All': 'ALLMAIL' };
 const NAME_GUESS = [[/^inbox$/i, 'INBOX'], [/^(sent|sent items|sent mail|sent messages)$/i, 'SENT'], [/^(trash|deleted|deleted items|deleted messages|bin)$/i, 'TRASH'],
@@ -198,7 +199,7 @@ class ImapProvider {
   /** FETCH metadata for a UID range into the DB; returns new ids. Newest first within the range. */
   async fetchRange(c, f, range, { onlyAbove = 0 } = {}) {
     const rows = [];
-    for await (const m of c.fetch(range, { uid: true, flags: true, envelope: true, bodyStructure: true, size: true, internalDate: true, headers: ['references', 'reply-to', 'content-type', 'list-unsubscribe'] }, { uid: true })) {
+    for await (const m of c.fetch(range, { uid: true, flags: true, envelope: true, bodyStructure: true, size: true, internalDate: true, headers: ['references', 'reply-to', 'content-type', 'list-unsubscribe', 'authentication-results'] }, { uid: true })) {
       if (m.uid <= onlyAbove) continue;
       rows.push(normaliseImap(m, f));
     }
@@ -388,7 +389,7 @@ function normaliseImap(m, f) {
     to: addr(env.to), cc: addr(env.cc), replyTo: h['reply-to'] || (addr(env.replyTo)[0]?.email) || null,
     messageIdHdr: env.messageId || null, inReplyTo: env.inReplyTo || null, references: h.references || null,
     hasAttachment: hasAttachmentPart(m.bodyStructure), labels: flagsToLabels(m.flags || new Set(), f.labelId), answered: (m.flags || new Set()).has('\\Answered'),
-    imapFolder: f.path, imapUid: m.uid, snoozeUntil: snoozeFromFlags(m.flags),
+    imapFolder: f.path, imapUid: m.uid, snoozeUntil: snoozeFromFlags(m.flags), auth: parseAuthResults(h['authentication-results']),
   };
 }
 async function streamToBuffer(stream) { const chunks = []; for await (const c of stream) chunks.push(c); return Buffer.concat(chunks); }

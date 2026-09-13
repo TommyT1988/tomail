@@ -4,6 +4,8 @@ import { buildDoc } from './ReadingPane.jsx';
 import RichEditor from './RichEditor.jsx';
 import Icon from './Icons.jsx';
 import AddressInput from './AddressInput.jsx';
+import { Dropdown, MI } from './Menus.jsx';
+import { followUpPresets } from '../util.js';
 
 /** draft: { mode:'new'|'reply'|'replyAll'|'forward', accountId, original?, draftId?, to?, subject? } */
 export default function Compose({ draft, accounts, prefs, onClose, toast, standalone = false }) {
@@ -30,6 +32,7 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
   const [sending, setSending] = useState(false);
   const [showCc, setShowCc] = useState(!!f.showCc);
   const [saveState, setSaveState] = useState('');
+  const [followUpAt, setFollowUpAt] = useState(null);
   const dirty = useRef(false);
   const saveTimer = useRef(null);
   const latest = useRef({ f, accountId, draftId }); latest.current = { f, accountId, draftId };
@@ -68,7 +71,7 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
     try {
       const { html, attachments } = extractInlineImages(f.html);
       const payload = { accountId, to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, html, text: htmlToText(html), quotedHtml: f.quotedHtml, quotedText: f.quotedText,
-        attachments: [...f.attachments, ...attachments], replyTo: orig ? { accountId: orig.accountId, id: orig.id } : draft.replyTo, mode: draft.mode, forwardAttachments: draft.mode === 'forward' && f.includeOrigAtts, draftId };
+        attachments: [...f.attachments, ...attachments], replyTo: orig ? { accountId: orig.accountId, id: orig.id } : draft.replyTo, mode: draft.mode, forwardAttachments: draft.mode === 'forward' && f.includeOrigAtts, draftId, followUpAt };
       if (standalone && (prefs?.sendDelaySec ?? 5) > 0) {
         // keep the draft so Undo in the main window can reopen it; the main process sends after the delay
         dirty.current = true; await save(); payload.draftId = latest.current.draftId;
@@ -89,6 +92,12 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
             <button className="primary" onClick={send} disabled={sending}>{sending ? 'Sending…' : <><Icon name="send" /> Send</>}</button>
             <button onClick={pick} disabled={sending}><Icon name="clip" /> Attach</button>
             <button onClick={save} disabled={sending}>Save draft</button>
+            <Dropdown title="Remind me if nobody replies by…" btnClass={followUpAt ? 'on' : ''} label={<><Icon name="clock" /> {followUpAt ? `Follow up ${new Date(followUpAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : 'Remind me'}</>}>
+              <div className="mhead">Remind me if no reply by</div>
+              {followUpPresets().map(p => <MI key={p.label} sub={new Date(p.at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} onClick={() => setFollowUpAt(p.at)}>{p.label}</MI>)}
+              <div className="mform" onClick={e => e.stopPropagation()}><input type="date" onChange={e => { if (e.target.value) setFollowUpAt(new Date(e.target.value + 'T09:00:00').getTime()); }} /></div>
+              {followUpAt && <><div className="msep" /><MI onClick={() => setFollowUpAt(null)}>No reminder</MI></>}
+            </Dropdown>
             <span className="draftstate">{saveState}</span>
             <span className="spacer" />
             <button onClick={discard} disabled={sending} title="Delete this draft and close"><Icon name="trash" /> Discard</button>

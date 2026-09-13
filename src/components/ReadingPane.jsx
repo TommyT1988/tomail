@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { addrList, fmtAddr, fmtAddrFull, fmtFull, fmtRange, fmtSize, fmtTime } from '../util.js';
+import { addrList, fmtAddr, fmtAddrFull, fmtFull, fmtRange, fmtSize, fmtTime, followUpPresets, fmtDuration, ago } from '../util.js';
+import { Dropdown, MI } from './Menus.jsx';
 import Icon from './Icons.jsx';
 
 export function buildDoc(html, { allowRemote }) {
@@ -80,13 +81,65 @@ function InviteCard({ m, onRespond }) {
   );
 }
 
-function Header({ message, onPrint, extra, onPopOut }) {
+function AuthBadges({ auth }) {
+  if (!auth) return null;
+  const b = (k, label) => { const v = auth[k]; if (!v) return null; const ok = v === 'pass'; const bad = /fail|softfail|permerror/.test(v); return <span key={k} className={'auth ' + (ok ? 'ok' : bad ? 'bad' : 'meh')} title={`${label}: ${v}`}>{ok ? '✓' : bad ? '✗' : '·'} {label}</span>; };
+  return <span className="auths">{b('spf', 'SPF')}{b('dkim', 'DKIM')}{b('dmarc', 'DMARC')}</span>;
+}
+/** Who is this sender, in numbers: history with them, how you deal with their mail, first-contact warning. */
+function SenderCard({ message, onOpenMessage, onRuleFromSender }) {
+  const [info, setInfo] = useState(null);
+  const [open, setOpen] = useState(() => localStorage.getItem('senderCard') !== '0');
+  useEffect(() => { let on = true; setInfo(null); if (message.fromEmail) window.mail.messages.senderInfo(message.fromEmail).then(i => on && setInfo(i)).catch(() => {}); return () => { on = false; }; }, [message.fromEmail, message.id]);
+  if (!message.fromEmail || !info || info.isOwn) return null;
+  const first = info.received <= 1 && info.sentTo === 0;
+  const failed = message.auth && Object.values(message.auth).some(v => /fail/.test(v || ''));
+  const toggle = () => { setOpen(o => { localStorage.setItem('senderCard', o ? '0' : '1'); return !o; }); };
+  return (
+    <div className={'sender' + (first ? ' first' : '') + (failed ? ' failed' : '')}>
+      <div className="sh" onClick={toggle}>
+        <span className="tw">{open ? '▾' : '▸'}</span>
+        <span className="who">{message.fromName || message.fromEmail}</span>
+        {first && <span className="flag">First message from this sender</span>}
+        {failed && <span className="flag bad">Authentication failed — could be spoofed</span>}
+        {info.spam > 0 && <span className="flag bad">{info.spam} in Junk before</span>}
+        {info.inContacts && <span className="flag ok">{info.contactSource === 'google' ? 'In your Google Contacts' : 'Known contact'}</span>}
+        <AuthBadges auth={message.auth} />
+        <span className="spacer" />
+        <span className="muted">{info.received} received · {info.sentTo} sent</span>
+      </div>
+      {open && (
+        <div className="sb">
+          <div className="stats">
+            <div><b>{info.received}</b><span>received{info.unread ? ` (${info.unread} unread)` : ''}</span></div>
+            <div><b>{info.sentTo}</b><span>sent to them</span></div>
+            <div><b>{info.repliedCount}</b><span>replied by you</span></div>
+            <div><b>{info.avgReplyMs != null ? fmtDuration(info.avgReplyMs) : '—'}</b><span>your typical reply time</span></div>
+            <div><b>{info.attachments}</b><span>with attachments</span></div>
+            <div><b>{info.firstSeen ? new Date(info.firstSeen).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '—'}</b><span>first seen</span></div>
+          </div>
+          {info.recent.length > 1 && <div className="recent"><span className="muted">Recent from them:</span>{info.recent.filter(r => r.id !== message.id).slice(0, 4).map(r => <a key={r.id} href="#" onClick={e => { e.preventDefault(); onOpenMessage?.(r); }} className={r.unread ? 'unread' : ''}>{r.subject || '(no subject)'} <span className="muted">{fmtTime(r.date)}</span></a>)}</div>}
+          <div className="sactions"><button onClick={() => onRuleFromSender?.(message)}>Create rule for this sender</button><button onClick={() => window.mail.shell.openExternal('https://www.google.com/search?q=' + encodeURIComponent(message.fromEmail.split('@')[1]))}>Look up domain</button></div>
+        </div>
+      )}
+    </div>
+  );
+}
+function FollowUpMenu({ message, toast }) {
+  return (
+    <Dropdown title="Remind me if nobody replies in this conversation" label={<><Icon name="clock" size={12} /> Follow up</>}>
+      <div className="mhead">Remind me if no reply by</div>
+      {followUpPresets().map(p => <MI key={p.label} sub={new Date(p.at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} onClick={() => window.mail.followups.add(message.accountId, message.id, p.at).then(() => toast?.('Reminder set')).catch(e => toast?.(e.message, true))}>{p.label}</MI>)}
+    </Dropdown>
+  );
+}
+function Header({ message, onPrint, extra, onPopOut, toast }) {
   const from = { name: message.fromName, email: message.fromEmail };
   return (
     <div className="hdr">
       <h2>{message.subject || '(no subject)'}</h2>
       <div className="line first"><span><b>{fmtAddrFull(from)}</b></span><span className="when">{fmtFull(message.date)}</span>
-        <span className="hbtns">{onPopOut && <button title="Open in a new window (o)" onClick={() => onPopOut(message)}><Icon name="external" size={12} /> Window</button>}<button title="Print" onClick={() => onPrint(message)}>Print</button>{extra}</span></div>
+        <span className="hbtns"><FollowUpMenu message={message} toast={toast} />{onPopOut && <button title="Open in a new window (o)" onClick={() => onPopOut(message)}><Icon name="external" size={12} /> Window</button>}<button title="Print" onClick={() => onPrint(message)}>Print</button>{extra}</span></div>
       <div className="line"><span>to {addrList(message.to) || '—'}</span>{message.cc?.length > 0 && <span>· cc {addrList(message.cc)}</span>}</div>
       {message.labels?.length > 0 && <div className="labs">{message.labels.filter(l => !['UNREAD', 'CATEGORY_PERSONAL'].includes(l) && !/^Label_\d+$/.test(l) && !/^\$Tomail/.test(l)).map(l => <span key={l}>{l.replace(/^CATEGORY_/, '').toLowerCase()}</span>)}</div>}
     </div>
@@ -130,7 +183,7 @@ function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo })
   );
 }
 
-export default function ReadingPane({ message, thread, loading, prefs, error, onRespond, onPrint, onReplyTo, onPopOut }) {
+export default function ReadingPane({ message, thread, loading, prefs, error, onRespond, onPrint, onReplyTo, onPopOut, onOpenMessage, onRuleFromSender, toast }) {
   const [allow, setAllow] = useState({});
   const [openIds, setOpenIds] = useState(new Set());
   useEffect(() => { if (thread?.length) setOpenIds(new Set([thread[thread.length - 1].id, ...thread.filter(m => m.unread).map(m => m.id)])); }, [thread?.map(m => m.id).join(',')]); // eslint-disable-line
@@ -142,7 +195,8 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
     return (
       <div className="read">
         <div className="hdr"><h2>{latest.subject || message.subject || '(no subject)'}</h2><div className="line"><span className="muted">{thread.length} messages in this conversation</span>
-          <span className="hbtns">{onPopOut && <button onClick={() => onPopOut(latest)}><Icon name="external" size={12} /> Window</button>}<button onClick={() => setOpenIds(new Set(thread.map(m => m.id)))}>Expand all</button><button onClick={() => setOpenIds(new Set([latest.id]))}>Collapse</button></span></div></div>
+          <span className="hbtns"><FollowUpMenu message={latest} toast={toast} />{onPopOut && <button onClick={() => onPopOut(latest)}><Icon name="external" size={12} /> Window</button>}<button onClick={() => setOpenIds(new Set(thread.map(m => m.id)))}>Expand all</button><button onClick={() => setOpenIds(new Set([latest.id]))}>Collapse</button></span></div></div>
+        <SenderCard message={latest} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} />
         <div className="thread">
           {thread.map(m => <ThreadCard key={m.id} m={m.id === message.id ? message : m} open={openIds.has(m.id)} prefs={prefs} onRespond={onRespond} onPrint={onPrint} onReplyTo={onReplyTo}
             onToggle={() => setOpenIds(s => { const n = new Set(s); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })} />)}
@@ -152,7 +206,8 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
   }
   return (
     <div className="read">
-      <Header message={message} onPrint={onPrint} onPopOut={onPopOut} />
+      <Header message={message} onPrint={onPrint} onPopOut={onPopOut} toast={toast} />
+      <SenderCard message={message} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} />
       {message.calendar && <InviteCard m={message} onRespond={onRespond} />}
       <Attachments m={message} />
       {error && <div className="imgbar" style={{ background: '#fde8e6', borderColor: '#f3b5ae' }}>⚠ {error}</div>}

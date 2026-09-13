@@ -4,7 +4,8 @@
 const { parseAddresses, headersToObj } = require('./mime');
 const { sleep, GmailError } = require('./api');
 
-const META_HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'References', 'Reply-To', 'Content-Type'];
+const META_HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'References', 'Reply-To', 'Content-Type', 'Authentication-Results'];
+const { parseAuthResults } = require('../authResults');
 const BATCH = 40;          // 40 × 5 units = 200 units per batch; the client's budget paces to ~1 batch/s
 const PAGE = 500;          // messages.list max
 const PAUSE_MS = 50;       // budget does the real pacing
@@ -19,7 +20,7 @@ function normaliseMessage(m) {
     size: m.sizeEstimate || 0, snippet: decodeEntities(m.snippet || ''), subject: h.subject || '',
     fromName: from.name, fromEmail: from.email, to: parseAddresses(h.to), cc: parseAddresses(h.cc),
     replyTo: h['reply-to'] || null, messageIdHdr: h['message-id'] || null, inReplyTo: h['in-reply-to'] || null,
-    references: h.references || null, hasAttachment: ct.startsWith('multipart/mixed'), labels: m.labelIds || [],
+    references: h.references || null, hasAttachment: ct.startsWith('multipart/mixed'), labels: m.labelIds || [], auth: parseAuthResults(h['authentication-results']),
   };
 }
 function decodeEntities(s) {

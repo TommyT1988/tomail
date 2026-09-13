@@ -93,7 +93,7 @@ async function buildRaw(opts) {
   const mail = {
     from: opts.from, to: opts.to, cc: opts.cc || undefined, bcc: opts.bcc || undefined, subject: opts.subject || '',
     text: opts.text || '', html: opts.html || undefined, attachments: opts.attachments || [],
-    inReplyTo: opts.inReplyTo || undefined, references: opts.references || undefined, icalEvent: opts.icalEvent || undefined,
+    inReplyTo: opts.inReplyTo || undefined, references: opts.references || undefined, icalEvent: opts.icalEvent || undefined, messageId: opts.messageId || undefined,
   };
   const buf = await new MailComposer(mail).compile().build();
   return b64urlEncode(buf);

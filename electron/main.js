@@ -264,6 +264,11 @@ function registerIpc() {
   handle('send:queue', (payload) => queueSend(payload));
   handle('send:cancel', (id) => { const p = pendingSends.get(id); if (!p) return false; clearTimeout(p.timer); pendingSends.delete(id); send('send:state', { id, state: 'cancelled', subject: p.payload.subject, draftId: p.payload.draftId, accountId: p.payload.accountId }); return true; });
   handle('outbox:list', () => db.listOutbox());
+  handle('followups:list', () => { actions.checkFollowups(); return db.listFollowups(); });
+  handle('followups:add', (accountId, messageId, dueAt) => actions.addFollowup(accountId, messageId, dueAt));
+  handle('followups:update', (id, fields) => { const allowed = {}; if (fields.dueAt) { allowed.due_at = Number(fields.dueAt); allowed.status = 'waiting'; allowed.notified = 0; } if (fields.status) allowed.status = fields.status; db.updateFollowup(id, allowed); notifyChanged(); return db.getFollowup(id); });
+  handle('followups:remove', (id) => { db.deleteFollowup(id); notifyChanged(); return true; });
+  handle('messages:senderInfo', (email) => db.senderInfo(email, db.listAccounts().map(a => a.email)));
   handle('outbox:sendNow', (id) => actions.sendOutboxItem(id));
   handle('outbox:remove', (id) => { db.removeOutbox(id); notifyChanged(); return true; });
   handle('labels:rename', (accountId, id, name) => actions.renameLabel(accountId, id, name));
@@ -404,6 +409,7 @@ app.whenReady().then(async () => {
   createWindow();
   syncAll().catch(() => {});
   scheduleSync();
+  setInterval(() => { try { for (const f of actions.checkFollowups()) { if (!f.notified && Notification.isSupported() && settings.get().prefs.notifications !== false) { const n = new Notification({ title: 'No reply yet: ' + (f.subject || '(no subject)'), body: `Sent to ${f.to} on ${new Date(f.createdAt).toLocaleDateString('en-GB')} — follow up?` }); n.on('click', () => { if (win) { win.show(); win.focus(); send('app:open-followups', {}); } }); n.show(); actions.markFollowupNotified(f.id); } } } catch (e) { log('followups:', e.message); } }, 5 * 60000);
   outboxTimer = setInterval(() => actions.processOutbox().then(n => { if (n) log(`outbox: sent ${n}`); }).catch(e => log('outbox:', e.message)), 60000);
   housekeepTimer = setTimeout(housekeeping, 90000); setInterval(housekeeping, 24 * 3600000);
   snoozeTimer = setInterval(() => actions.wakeDueSnoozes().then(n => { if (n) notifyChanged(); }).catch(e => log('snooze wake:', e.message)), 30000);
