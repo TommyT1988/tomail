@@ -125,6 +125,24 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF subject, from_name, fro
           coalesce(new.to_json,'')||' '||coalesce(new.cc_json,''), new.snippet, new.body_text);
 END;
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS contacts (
+  email TEXT PRIMARY KEY,
+  name TEXT,
+  sent_count INTEGER NOT NULL DEFAULT 0,
+  recv_count INTEGER NOT NULL DEFAULT 0,
+  last_used INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS rules (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  account_id INTEGER,
+  position INTEGER NOT NULL DEFAULT 0,
+  match TEXT NOT NULL DEFAULT 'all',
+  conditions_json TEXT NOT NULL DEFAULT '[]',
+  actions_json TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL
+);
 `;
 
 class MailDb {
@@ -216,6 +234,34 @@ class MailDb {
   }
 
   // ── messages: writes ──────────────────────────────────────────────────
+  // ── contacts (harvested from mail: people you write to count most) ──
+  harvestContacts(rows) {
+    const up = this.prep(`INSERT INTO contacts (email, name, sent_count, recv_count, last_used) VALUES (?,?,?,?,?)
+      ON CONFLICT(email) DO UPDATE SET name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE contacts.name END,
+        sent_count = contacts.sent_count + excluded.sent_count, recv_count = contacts.recv_count + excluded.recv_count, last_used = max(contacts.last_used, excluded.last_used)`);
+    for (const m of rows) {
+      const sent = m.labels.includes('SENT');
+      const people = sent ? [...(m.to || []), ...(m.cc || [])] : (m.fromEmail ? [{ name: m.fromName, email: m.fromEmail }] : []);
+      for (const p of people) { if (!p.email || !p.email.includes('@') || /no-?reply|donotreply|mailer-daemon|notification/i.test(p.email)) continue; up.run(p.email.toLowerCase(), p.name || '', sent ? 1 : 0, sent ? 0 : 1, m.internalDate || 0); }
+    }
+  }
+  searchContacts(q, limit = 8) {
+    const like = '%' + String(q || '').toLowerCase() + '%';
+    return this.prep(`SELECT email, name, sent_count, recv_count, last_used FROM contacts WHERE email LIKE ? OR lower(name) LIKE ?
+      ORDER BY (sent_count * 5 + recv_count) DESC, last_used DESC LIMIT ?`).all(like, like, limit);
+  }
+  // ── rules ──
+  listRules() { return this.prep('SELECT * FROM rules ORDER BY position, id').all().map(rowToRule); }
+  saveRule(r) {
+    if (r.id) { this.prep('UPDATE rules SET name=?, enabled=?, account_id=?, match=?, conditions_json=?, actions_json=?, position=? WHERE id=?').run(r.name, r.enabled ? 1 : 0, r.accountId ?? null, r.match || 'all', JSON.stringify(r.conditions || []), JSON.stringify(r.actions || []), r.position ?? 0, r.id); return this.listRules().find(x => x.id === r.id); }
+    const pos = this.prep('SELECT coalesce(max(position),0)+1 AS p FROM rules').get().p;
+    const res = this.prep('INSERT INTO rules (name, enabled, account_id, match, conditions_json, actions_json, position, created_at) VALUES (?,?,?,?,?,?,?,?)').run(r.name, r.enabled === false ? 0 : 1, r.accountId ?? null, r.match || 'all', JSON.stringify(r.conditions || []), JSON.stringify(r.actions || []), pos, Date.now());
+    return this.listRules().find(x => x.id === Number(res.lastInsertRowid));
+  }
+  deleteRule(id) { this.prep('DELETE FROM rules WHERE id = ?').run(id); }
+  /** Adopt a snooze wake time learned from the server (another device snoozed it) without clobbering a local one. */
+  adoptSnooze(accountId, id, until) { this.prep('UPDATE messages SET snooze_until = ? WHERE account_id = ? AND id = ? AND snooze_until IS NULL').run(until, accountId, id); }
+
   /** rows: normalised message rows (see sync.normaliseMessage). Existing rows keep their body cache. */
   upsertMessages(accountId, rows) {
     const ins = this.prep(`INSERT INTO messages (account_id, id, thread_id, history_id, internal_date, size, snippet, subject,
@@ -242,7 +288,9 @@ class MailDb {
           m.imapFolder || null, m.imapUid ?? null);
         delL.run(accountId, m.id);
         for (const l of m.labels) insL.run(accountId, m.id, l);
+        if (m.snoozeUntil) this.adoptSnooze(accountId, m.id, m.snoozeUntil);
       }
+      this.harvestContacts(rows);
     });
   }
   deleteMessages(accountId, ids) {
@@ -503,6 +551,7 @@ function rowToListItem(r) {
     imapFolder: r.imap_folder, imapUid: r.imap_uid, threadCount: r.thread_count || undefined, threadUnread: r.thread_unread || undefined,
   };
 }
+function rowToRule(r) { return { id: r.id, name: r.name, enabled: !!r.enabled, accountId: r.account_id, position: r.position, match: r.match, conditions: safeJson(r.conditions_json, []), actions: safeJson(r.actions_json, []) }; }
 function rowToDraft(r) {
   return { id: r.id, accountId: r.account_id, mode: r.mode, replyTo: r.reply_message_id ? { accountId: r.reply_account_id, id: r.reply_message_id } : null,
     to: r.to_text || '', cc: r.cc_text || '', bcc: r.bcc_text || '', subject: r.subject || '', bodyHtml: r.body_html || '', bodyText: r.body_text || '',

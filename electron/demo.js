@@ -68,6 +68,7 @@ function seedDemo(db) {
   const m2 = [{ id: 's1', threadId: 's1', internalDate: t(9, 30), size: 12000, snippet: 'Order enquiry', subject: 'Do you have the 14-inch laptop in stock?', fromName: 'A Customer', fromEmail: 'cust@example.com', to: [{ name: '', email: 'shop@example.com' }], cc: [], labels: ['INBOX', 'UNREAD'] }];
   db.upsertMessages(a2.id, m2);
   db.setBody(a2.id, 's1', { text: 'Hi, is the 14-inch model still available? Thanks', html: textToHtml('Hi, is the 14-inch model still available? Thanks'), attachments: [] });
+  db.saveRule({ name: 'File courier updates', enabled: true, accountId: a1.id, match: 'any', conditions: [{ field: 'from', op: 'contains', value: 'parcelio.example' }, { field: 'subject', op: 'contains', value: 'collection' }], actions: [{ type: 'moveTo', labelId: L['Couriers'] }, { type: 'markRead' }] });
   db.updateAccount(a1.id, { initial_done: 1, history_id: '1', last_sync_at: Date.now() - 5 * 60000 });
   db.updateAccount(a2.id, { initial_done: 1, history_id: '1', last_sync_at: Date.now() - 5 * 60000 });
 }

@@ -3,6 +3,7 @@ import { addrList, escapeHtml, fmtAddrFull, fmtFull, htmlToText, textToQuoted } 
 import { buildDoc } from './ReadingPane.jsx';
 import RichEditor from './RichEditor.jsx';
 import Icon from './Icons.jsx';
+import AddressInput from './AddressInput.jsx';
 
 /** draft: { mode:'new'|'reply'|'replyAll'|'forward', accountId, original?, draftId?, to?, subject? } */
 export default function Compose({ draft, accounts, prefs, onClose, toast }) {
@@ -81,9 +82,9 @@ export default function Compose({ draft, accounts, prefs, onClose, toast }) {
             {accounts.length > 1 ? <select value={accountId} onChange={e => { const id = Number(e.target.value); const old = sigHtml(acct), nu = sigHtml(accounts.find(a => a.id === id)); setAccountId(id); setF(x => ({ ...x, html: old && x.html.endsWith(old) ? x.html.slice(0, -old.length) + nu : x.html })); dirty.current = true; scheduleSave(); }}>{accounts.map(a => <option key={a.id} value={a.id}>{a.display_name && a.display_name !== a.email ? `${a.display_name} <${a.email}>` : a.email}</option>)}</select>
               : <span>{acct?.email}</span>}
           </div>
-          <div className="field"><label>To</label><div style={{ display: 'flex', gap: 6 }}><input type="text" value={f.to} onChange={set('to')} placeholder="name@example.com, …" autoFocus={draft.mode === 'new' || draft.mode === 'forward'} />
+          <div className="field"><label>To</label><div style={{ display: 'flex', gap: 6 }}><AddressInput value={f.to} onChange={v => set('to')({ target: { value: v } })} placeholder="name@example.com, …" autoFocus={draft.mode === 'new' || draft.mode === 'forward'} />
             {!showCc && <button className="ccbcc" onClick={() => setShowCc(true)}>Cc/Bcc</button>}</div></div>
-          {showCc && <><div className="field"><label>Cc</label><input type="text" value={f.cc} onChange={set('cc')} /></div><div className="field"><label>Bcc</label><input type="text" value={f.bcc} onChange={set('bcc')} /></div></>}
+          {showCc && <><div className="field"><label>Cc</label><AddressInput value={f.cc} onChange={v => set('cc')({ target: { value: v } })} /></div><div className="field"><label>Bcc</label><AddressInput value={f.bcc} onChange={v => set('bcc')({ target: { value: v } })} /></div></>}
           <div className="field"><label>Subject</label><input type="text" value={f.subject} onChange={set('subject')} /></div>
           <RichEditor value={f.html} onChange={(h) => { setF(x => ({ ...x, html: h })); dirty.current = true; scheduleSave(); }} autoFocus={draft.mode === 'reply' || draft.mode === 'replyAll'} />
           {(f.attachments.length > 0 || (draft.mode === 'forward' && orig?.attachments?.length > 0)) && (

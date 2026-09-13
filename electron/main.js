@@ -11,6 +11,7 @@ const { Actions } = require('./actions');
 const { seedDemo, DemoProvider } = require('./demo');
 const { autoconfig, ImapProvider } = require('./providers/imap');
 const { buildDoc } = require('./printDoc');
+const { runRules } = require('./rules');
 
 const DEMO = process.env.MAIL_DEMO === '1';
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -39,6 +40,8 @@ const syncStatus = {};
 let lastCheckedAt = null;
 let syncTimer, snoozeTimer, changeTimer;
 const syncing = new Set();
+const lastSyncAt = new Map();   // accountId → ms
+const pushTimers = new Map();
 
 function send(channel, payload) { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); }
 function notifyChanged() { clearTimeout(changeTimer); changeTimer = setTimeout(() => send('mail:changed', {}), 300); }
@@ -49,10 +52,13 @@ async function syncOne(accountId) {
   syncing.add(accountId);
   try {
     const p = accounts.provider(accountId);
+    if (p.kind === 'imap' && !p.onPush) p.onPush = () => { clearTimeout(pushTimers.get(accountId)); pushTimers.set(accountId, setTimeout(() => syncOne(accountId).catch(() => {}), 800)); };
     const r = await p.sync((st) => { syncStatus[accountId] = st; broadcastStatus(); if (st.phase !== 'error') notifyChanged(); });
     syncStatus[accountId] = { phase: 'idle' };
+    lastSyncAt.set(accountId, Date.now());
     notifyChanged();
-    if (r?.newInbox?.length) notifyNewMail(accountId, r.newInbox);
+    if (r?.newIds?.length) { try { const res = await runRules({ db, actions, accountId, ids: r.newIds, log }); if (res.applied) log(`rules: ${res.applied} message(s) filed`); } catch (e) { log('rules:', e.message); } }
+    if (r?.newInbox?.length) notifyNewMail(accountId, r.newInbox.filter(id => db.getMessage(accountId, id)?.labels.includes('INBOX')));
   } catch (e) {
     syncStatus[accountId] = { phase: 'error', error: e.message, code: e.code };
     log(`sync ${accountId}: ${e.message}`);
@@ -65,10 +71,19 @@ async function syncAll(onlyAccountId = null) {
   lastCheckedAt = Date.now();
   broadcastStatus();
 }
+/** Adaptive polling: every `fastPollSec` while Tomail is the active window, `syncIntervalSec` otherwise.
+ *  IMAP accounts also get pushed to by IDLE, so they mostly sync ahead of the timer. */
 function scheduleSync() {
   clearInterval(syncTimer);
-  const sec = Math.max(15, settings.get().prefs.syncIntervalSec || 60);
-  syncTimer = setInterval(() => syncAll().catch(() => {}), sec * 1000);
+  syncTimer = setInterval(() => {
+    if (DEMO) return;
+    const prefs = settings.get().prefs;
+    const focused = win && !win.isDestroyed() && win.isFocused();
+    const due = (focused ? Math.max(10, prefs.fastPollSec || 20) : Math.max(15, prefs.syncIntervalSec || 60)) * 1000;
+    for (const a of db.listAccounts()) { if (Date.now() - (lastSyncAt.get(a.id) || 0) >= due) syncOne(a.id).catch(() => {}); }
+    lastCheckedAt = Math.max(lastCheckedAt || 0, ...[...lastSyncAt.values()]);
+    broadcastStatus();
+  }, 5000);
 }
 function notifyNewMail(accountId, ids) {
   if (settings.get().prefs.notifications === false || !Notification.isSupported()) return;
@@ -127,6 +142,8 @@ function createWindow() {
         await wait(1000); await shot('5-thread.png');
         await js(`(() => { const b = [...document.querySelectorAll('.status button')].find(b => /Settings/.test(b.textContent)); b && b.click(); })()`);
         await wait(600); await shot('6-settings.png');
+        await js(`(() => { const b = [...document.querySelectorAll('.settings .tabs button')].find(b => /Rules/.test(b.textContent)); b && b.click(); })()`);
+        await wait(500); await shot('8-rules.png');
         await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return window.mail.settings.set({ prefs: { theme: 'dark' } }).then(() => { document.documentElement.dataset.theme = 'dark'; }); })()`);
         await wait(900); await shot('7-dark.png');
         await js(`window.mail.settings.set({ prefs: { theme: 'system' } })`);
@@ -198,6 +215,16 @@ function registerIpc() {
   for (const a of ['markRead', 'star', 'archive', 'trash', 'untrash', 'spam', 'move', 'snooze', 'unsnooze', 'send', 'deleteForever', 'emptyFolder', 'respondInvite'])
     handle('actions:' + a, (...args) => actions[a](...args));
   handle('drafts:list', () => ({ local: actions.listDrafts(), remote: actions.remoteDraftMessages() }));
+  handle('rules:list', () => db.listRules());
+  handle('rules:save', (r) => { const s = db.saveRule(r); notifyChanged(); return s; });
+  handle('rules:remove', (id) => { db.deleteRule(id); notifyChanged(); return true; });
+  handle('rules:run', async (accountId, labelId = 'INBOX') => {
+    // apply the rule set to what's already in a folder (cap 2000, newest first)
+    const ids = db.listMessages({ kind: 'label', accountId, labelId }, { limit: 2000 }).map(m => m.id);
+    const res = await runRules({ db, actions, accountId, ids, log });
+    return { scanned: ids.length, applied: res.applied };
+  });
+  handle('contacts:search', (q) => db.searchContacts(q));
   handle('drafts:get', (id) => actions.getDraft(id));
   handle('drafts:save', (d) => actions.saveDraft(d));
   handle('drafts:remove', (id) => actions.deleteDraft(id));

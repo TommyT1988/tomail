@@ -48,7 +48,7 @@ export function MarkMenu({ disabled, onMark, inSpam }) {
     </Dropdown>
   );
 }
-export function QuickActionsMenu({ disabled, labels, onMove, onUnsnooze, canUnsnooze, onNewLabel, inTrash, onRestore, onEmpty, folderName, onDeleteForever, canDeleteForever }) {
+export function QuickActionsMenu({ disabled, labels, onMove, onUnsnooze, canUnsnooze, onNewLabel, inTrash, onRestore, onEmpty, folderName, onDeleteForever, canDeleteForever, onRuleFromSender }) {
   const [filter, setFilter] = useState('');
   const user = labels.filter(l => l.type === 'user' && l.name.toLowerCase().includes(filter.toLowerCase()));
   return (
@@ -69,6 +69,7 @@ export function QuickActionsMenu({ disabled, labels, onMove, onUnsnooze, canUnsn
       </div>
       <div className="msep" />
       <MI onClick={() => { const n = prompt('New folder name (use / for nesting):'); if (n) onNewLabel(n); }}><Icon name="plus" /> New folder…</MI>
+      <MI onClick={onRuleFromSender} disabled={disabled}><Icon name="zap" /> Create rule from sender…</MI>
     </Dropdown>
   );
 }

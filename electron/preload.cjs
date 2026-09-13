@@ -27,6 +27,8 @@ const api = {
     send: (opts) => call('actions:send', opts), deleteForever: (t) => call('actions:deleteForever', t), emptyFolder: (accountId, labelId) => call('actions:emptyFolder', accountId, labelId),
     respondInvite: (accountId, id, partstat) => call('actions:respondInvite', accountId, id, partstat),
   },
+  rules: { list: () => call('rules:list'), save: (r) => call('rules:save', r), remove: (id) => call('rules:remove', id), run: (accountId, labelId) => call('rules:run', accountId, labelId) },
+  contacts: { search: (q) => call('contacts:search', q) },
   drafts: { list: () => call('drafts:list'), get: (id) => call('drafts:get', id), save: (d) => call('drafts:save', d), remove: (id) => call('drafts:remove', id), openRemote: (accountId, messageId) => call('drafts:openRemote', accountId, messageId) },
   attachments: { save: (a, m, att) => call('attachments:save', a, m, att), open: (a, m, att) => call('attachments:open', a, m, att) },
   compose: { pickFiles: () => call('compose:pickFiles') },

@@ -22,7 +22,8 @@ class GmailProvider {
     const before = new Set(this.db.labelIds(this.accountId, 'INBOX'));
     await s.run();
     const after = this.db.labelIds(this.accountId, 'INBOX').filter(id => !before.has(id));
-    return { newInbox: after };
+    this.reconcileSnoozes();
+    return { newInbox: after, newIds: after };
   }
   async modify(ids, { add = [], remove = [] }) {
     for (let i = 0; i < ids.length; i += 1000) {
@@ -64,6 +65,22 @@ class GmailProvider {
   async draftIdForMessage(messageId) {
     const j = await this.client.get('/drafts', { maxResults: 500 });
     return (j.drafts || []).find(d => d.message?.id === messageId)?.id || null;
+  }
+  /** Wake-time marker label (hidden in Gmail's sidebar) so other devices learn the snooze. */
+  async untilLabel(ts) {
+    const name = 'Tomail/until/' + new Date(ts).toISOString().slice(0, 16).replace(/[-:]/g, '');
+    let l = this.db.findLabelByName(this.accountId, name);
+    if (!l) { try { l = await this.client.post('/labels', { name, labelListVisibility: 'labelHide', messageListVisibility: 'hide' }); } catch (e) { if (!(e instanceof GmailError && e.status === 409)) throw e; await this.syncLabels(); l = this.db.findLabelByName(this.accountId, name); } this.db.addLabel(this.accountId, l); }
+    return l.id;
+  }
+  /** After a sync: adopt snoozes set elsewhere, drop empty until-labels. */
+  reconcileSnoozes() {
+    const labels = this.db.listLabels(this.accountId).filter(l => /^Tomail\/until\//.test(l.name));
+    for (const l of labels) {
+      const m = /(\d{8})T(\d{4})$/.exec(l.name); if (!m) continue;
+      const ts = Date.UTC(+m[1].slice(0, 4), +m[1].slice(4, 6) - 1, +m[1].slice(6, 8), +m[2].slice(0, 2), +m[2].slice(2, 4));
+      for (const id of this.db.labelIds(this.accountId, l.id)) this.db.adoptSnooze(this.accountId, id, ts);
+    }
   }
   get canDeleteForever() { const a = this.db.getAccount(this.accountId); return /mail\.google\.com/.test(a?.scopes || ''); }
   async deleteForever(ids) {

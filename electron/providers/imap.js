@@ -14,6 +14,7 @@ const NAME_GUESS = [[/^inbox$/i, 'INBOX'], [/^(sent|sent items|sent mail|sent me
 const FOLDER_LABELS = new Set(['INBOX', 'SENT', 'TRASH', 'SPAM', 'DRAFT', 'ARCHIVE', 'ALLMAIL']);
 const FLAG_LABELS = new Set(['UNREAD', 'STARRED']);
 const CHUNK = 250;
+const SNOOZE_KW = /^\$TomailUntil(\d{10,13})$/;
 const FLAG_SWEEP_MS = 10 * 60 * 1000;
 
 const mkId = (path, uid) => `${path}::${uid}`;
@@ -38,6 +39,8 @@ class ImapProvider {
         auth: { user: this.cfg.user, pass: this.cfg.pass }, logger: false, clientInfo: { name: 'Tomail' }, socketTimeout: 120000 });
       c.on('error', (e) => this.log(`imap error (${this.accountId}): ${e.message}`));
       c.on('close', () => { if (this.client === c) this.client = null; });
+      c.on('exists', () => { if (this.onPush && !this.running) this.onPush(); });
+      c.on('flags', () => { if (this.onPush && !this.running) this.onPush(); });
       await c.connect();
       this.client = c;
       return c;
@@ -93,7 +96,7 @@ class ImapProvider {
   async sync(onProgress = () => {}) {
     if (this.running) return { newInbox: [] };
     this.running = true; this.cancelled = false;
-    const newInbox = [];
+    const newInbox = [], newAll = [];
     try {
       await this.syncLabels();
       const acct = this.db.getAccount(this.accountId);
@@ -106,12 +109,15 @@ class ImapProvider {
         onProgress({ phase: initial ? 'initial' : 'incremental', synced, folder: f.name });
         const r = await this.syncFolder(f, { onProgress: (n) => { synced += n; onProgress({ phase: initial ? 'initial' : 'incremental', synced, folder: f.name }); }, flagSweep: doFlagSweep });
         if (f.labelId === 'INBOX') newInbox.push(...r.newIds.filter(id => this.db.getMessage(this.accountId, id)?.unread));
+        if (!['SENT', 'DRAFT', 'TRASH', 'SPAM'].includes(f.labelId)) newAll.push(...r.newIds);
       }
       if (doFlagSweep) this.lastFlagSweep = Date.now();
+      // Leave INBOX selected so the connection idles there and the server pushes new-mail events to us.
+      try { const inbox = this.folderFor('INBOX'); if (inbox) { const c = await this.conn(); if (c.mailbox?.path !== inbox.path) await c.mailboxOpen(inbox.path); } } catch {}
       const allDone = this.folders.every(f => this.db.imapFolder(this.accountId, f.path)?.initial_done);
       this.db.updateAccount(this.accountId, { synced_count: synced, initial_done: allDone ? 1 : 0, last_sync_at: Date.now(), last_error: null });
       onProgress({ phase: 'idle' });
-      return { newInbox };
+      return { newInbox, newIds: newAll };
     } catch (e) {
       this.db.updateAccount(this.accountId, { last_error: e.message });
       onProgress({ phase: 'error', error: e.message, code: /auth|login|credentials/i.test(e.message) ? 'REAUTH' : undefined });
@@ -126,7 +132,9 @@ class ImapProvider {
     const newIds = [];
     try {
       const mb = c.mailbox;
-      let st = this.db.imapFolder(this.accountId, f.path) || { uid_validity: null, last_uid: 0, min_uid: null, modseq: null, initial_done: 0 };
+      const st0 = this.db.imapFolder(this.accountId, f.path);
+      const firstVisit = !st0;
+      let st = st0 || { uid_validity: null, last_uid: 0, min_uid: null, modseq: null, initial_done: 0 };
       if (st.uid_validity != null && st.uid_validity !== mb.uidValidity) {
         this.log(`UIDVALIDITY changed for ${f.path} — refetching`);
         this.db.deleteFolderMessages(this.accountId, f.path);
@@ -140,7 +148,7 @@ class ImapProvider {
       } else if (top > st.last_uid) {
         // new mail since last visit
         const ids = await this.fetchRange(c, f, `${st.last_uid + 1}:*`, { onlyAbove: st.last_uid });
-        newIds.push(...ids); onProgress(ids.length);
+        if (!firstVisit) newIds.push(...ids); onProgress(ids.length);
         st.last_uid = top;
       }
       // backfill older mail (initial sync), bounded per pass so other folders/accounts get a turn
@@ -175,6 +183,7 @@ class ImapProvider {
             const want = flagsToLabels(fl, f.labelId);
             const add = want.filter(l => !r.labels.includes(l)), remove = r.labels.filter(l => !want.includes(l));
             if (add.length || remove.length) this.db.applyLabelChange(this.accountId, [r.id], { add, remove });
+            const sn = snoozeFromFlags(fl); if (sn) this.db.adoptSnooze(this.accountId, r.id, sn);
             const answered = fl.has('\\Answered') ? 1 : 0;
             if (answered !== r.answered) this.db.prep('UPDATE messages SET answered = ? WHERE account_id = ? AND id = ?').run(answered, this.accountId, r.id);
           }
@@ -207,8 +216,12 @@ class ImapProvider {
     const flagAdd = [], flagDel = [];
     if (add.includes('STARRED')) flagAdd.push('\\Flagged'); if (remove.includes('STARRED')) flagDel.push('\\Flagged');
     if (add.includes('UNREAD')) flagDel.push('\\Seen'); if (remove.includes('UNREAD')) flagAdd.push('\\Seen');
-    let target = add.find(l => !FLAG_LABELS.has(l)) || null;
-    if (!target && remove.some(l => l === 'INBOX' || (!FLAG_LABELS.has(l) && !FOLDER_LABELS.has(l)))) target = 'ARCHIVE';
+    if (add.includes('ANSWERED')) flagAdd.push('\\Answered');
+    for (const l of add) if (/^\$TomailUntil/.test(l)) flagAdd.push(l);
+    for (const l of remove) if (/^\$TomailUntil/.test(l)) flagDel.push(l);
+    const isFlagish = (l) => FLAG_LABELS.has(l) || l === 'ANSWERED' || /^\$TomailUntil/.test(l);
+    let target = add.find(l => !isFlagish(l)) || null;
+    if (!target && remove.some(l => l === 'INBOX' || (!isFlagish(l) && !FOLDER_LABELS.has(l)))) target = 'ARCHIVE';
     for (const [path, items] of byFolder) {
       const lock = await c.getMailboxLock(path);
       try {
@@ -326,6 +339,7 @@ class ImapProvider {
   }
 }
 
+function snoozeFromFlags(flags) { for (const f of flags || []) { const m = SNOOZE_KW.exec(f); if (m) return Number(m[1]) * (m[1].length <= 10 ? 1000 : 1); } return null; }
 function flagsToLabels(flags, folderLabel) {
   const l = [folderLabel];
   if (!flags.has('\\Seen')) l.push('UNREAD');
@@ -354,7 +368,7 @@ function normaliseImap(m, f) {
     to: addr(env.to), cc: addr(env.cc), replyTo: h['reply-to'] || (addr(env.replyTo)[0]?.email) || null,
     messageIdHdr: env.messageId || null, inReplyTo: env.inReplyTo || null, references: h.references || null,
     hasAttachment: hasAttachmentPart(m.bodyStructure), labels: flagsToLabels(m.flags || new Set(), f.labelId), answered: (m.flags || new Set()).has('\\Answered'),
-    imapFolder: f.path, imapUid: m.uid,
+    imapFolder: f.path, imapUid: m.uid, snoozeUntil: snoozeFromFlags(m.flags),
   };
 }
 async function streamToBuffer(stream) { const chunks = []; for await (const c of stream) chunks.push(c); return Buffer.concat(chunks); }

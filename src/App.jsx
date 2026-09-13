@@ -42,6 +42,7 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [compose, setCompose] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [ruleSeed, setRuleSeed] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [toastMsg, setToastMsg] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
@@ -243,6 +244,7 @@ export default function App() {
         <QuickActionsMenu disabled={!hasSel} labels={selLabels} onMove={doMove} inTrash={inTrash} onRestore={doRestore} onEmpty={doEmpty} onDeleteForever={doDeleteForever}
           canDeleteForever={!!(selAccount?.canDeleteForever)} folderName={view.labelId === 'SPAM' ? 'Junk' : 'Trash'}
           canUnsnooze={view.kind === 'snoozed'} onUnsnooze={() => act((t) => mail.actions.unsnooze(t), 'Back in inbox')}
+          onRuleFromSender={() => { const m = itemsRef.current.find(i => i.id === selected[0]?.id && i.accountId === selected[0]?.accountId); if (!m) return; setRuleSeed({ accountId: m.accountId, name: `From ${m.fromName || m.fromEmail}`, conditions: [{ field: 'from', op: 'contains', value: m.fromEmail }], actions: [{ type: 'moveTo', labelId: '' }] }); setSettingsOpen('rules'); }}
           onNewLabel={(n) => mail.labels.create(selected[0]?.accountId || view.accountId || accounts[0]?.id, n).then(() => toast('Folder created')).catch(e => toast(e.message, true))} />
         <span className="sep" />
         <button disabled={!hasSel} onClick={doTrash} title={inTrash ? 'Delete permanently' : 'Move to Trash'}><span className="ico"><Icon name="trash" /></span>{inTrash ? 'Delete forever' : 'Delete'}</button>
@@ -290,7 +292,7 @@ export default function App() {
         <button onClick={() => { mail.sync.now(); }} disabled={!accounts.length || info?.demo}><Icon name="refresh" size={12} /> Sync now</button>
       </div>
       {compose && <Compose key={compose.draftId || compose.original?.id || 'new'} draft={compose} accounts={accounts} prefs={prefs} onClose={() => { setCompose(null); loadMeta(); if (viewRef.current.kind === 'drafts') loadList(viewRef.current); }} toast={toast} />}
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} accounts={accounts} refreshAccounts={loadMeta} toast={toast} info={info} initialTab={typeof settingsOpen === 'string' ? settingsOpen : undefined} />}
+      {settingsOpen && <SettingsModal onClose={() => { setSettingsOpen(false); setRuleSeed(null); }} accounts={accounts} labels={labels} ruleSeed={ruleSeed} refreshAccounts={loadMeta} toast={toast} info={info} initialTab={typeof settingsOpen === 'string' ? settingsOpen : undefined} />}
       {toastMsg && <div className={'toast' + (toastMsg.err ? ' err' : '')}>{toastMsg.m}</div>}
     </div>
   );

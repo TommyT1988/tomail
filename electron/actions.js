@@ -68,11 +68,19 @@ class Actions {
     this.db.updateAccount(accountId, { snooze_label_id: l.id });
     return l.id;
   }
+  /** Server-side wake-time marker so every device running Tomail wakes the message: Gmail hidden label / IMAP keyword. */
+  async untilMarker(accountId, until) {
+    const p = this.providers(accountId);
+    if (p.kind === 'imap') return '$TomailUntil' + Math.floor(until / 1000);
+    if (p.untilLabel) return p.untilLabel(until);
+    return null;
+  }
   async snooze(targets, until) {
     for (const [accountId, ids] of this.groupByAccount(targets)) {
       const label = await this.snoozeLabel(accountId);
+      const marker = await this.untilMarker(accountId, until).catch(() => null);
       this.db.setSnooze(accountId, ids, until);
-      await this.modify(ids.map(id => ({ accountId, id })), { add: [label], remove: ['INBOX'] });
+      await this.modify(ids.map(id => ({ accountId, id })), { add: [label, ...(marker ? [marker] : [])], remove: ['INBOX'] });
       // IMAP moves re-key the rows; carry the snooze time onto the new keys
       for (const id of ids) if (!this.db.getMessage(accountId, id)) { /* rekeyed — find by label */ }
       const stillNull = this.db.prep('SELECT id FROM messages WHERE account_id = ? AND snooze_until IS NULL AND imap_folder = (SELECT imap_path FROM labels WHERE account_id = ? AND id = ?)').all(accountId, accountId, label).map(r => r.id);
@@ -83,8 +91,11 @@ class Actions {
   async unsnooze(targets) {
     for (const [accountId, ids] of this.groupByAccount(targets)) {
       const label = await this.snoozeLabel(accountId);
+      const untilLabels = new Set(this.db.listLabels(accountId).filter(l => /^Tomail\/until\//.test(l.name)).map(l => l.id));
+      const markers = new Set();
+      for (const id of ids) for (const l of this.db.getMessage(accountId, id)?.labels || []) if (/^\$TomailUntil/.test(l) || untilLabels.has(l)) markers.add(l);
       this.db.setSnooze(accountId, ids, null);
-      await this.modify(ids.map(id => ({ accountId, id })), { add: ['INBOX', 'UNREAD'], remove: [label] });
+      await this.modify(ids.map(id => ({ accountId, id })), { add: ['INBOX', 'UNREAD'], remove: [label, ...markers] });
     }
     this.onChange();
   }

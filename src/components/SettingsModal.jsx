@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Icon from './Icons.jsx';
+import RulesTab from './RulesTab.jsx';
 
 function ImapForm({ onDone, toast }) {
   const [email, setEmail] = useState('');
@@ -43,7 +44,7 @@ function ImapForm({ onDone, toast }) {
   );
 }
 
-export default function SettingsModal({ onClose, accounts, refreshAccounts, toast, info, initialTab }) {
+export default function SettingsModal({ onClose, accounts, refreshAccounts, toast, info, initialTab, labels = {}, ruleSeed }) {
   const [tab, setTab] = useState(initialTab || (accounts.length ? 'general' : 'accounts'));
   const [s, setS] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -67,11 +68,12 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
         <div className="mh">Settings<button className="x" onClick={onClose}>✕</button></div>
         <div className="mb">
           <div className="tabs">
-            {[['general', 'General'], ['accounts', 'Accounts'], ['google', 'Advanced']].map(([id, n]) => <button key={id} className={'tab' + (tab === id ? ' active' : '')} onClick={() => setTab(id)}>{n}</button>)}
+            {[['general', 'General'], ['accounts', 'Accounts'], ['rules', 'Rules'], ['google', 'Advanced']].map(([id, n]) => <button key={id} className={'tab' + (tab === id ? ' active' : '')} onClick={() => setTab(id)}>{n}</button>)}
           </div>
           {tab === 'general' && <>
             <div className="frow"><label>Appearance</label><div style={{ display: 'flex', gap: 4 }}>{[['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([v, n]) => <button key={v} className={s.prefs.theme === v || (!s.prefs.theme && v === 'system') ? 'primary' : ''} onClick={() => { pref('theme', v); window.mail.settings.set({ prefs: { theme: v } }); document.documentElement.dataset.theme = v === 'system' ? '' : v; }}>{v === 'light' ? <Icon name="sun" size={12} /> : v === 'dark' ? <Icon name="moon" size={12} /> : null} {n}</button>)}</div></div>
-            <div className="frow"><label>Check for new mail every</label><div><input type="number" min="15" style={{ width: 80 }} value={s.prefs.syncIntervalSec} onChange={e => pref('syncIntervalSec', Number(e.target.value))} /> seconds</div></div>
+            <div className="frow"><label>Check for new mail every</label><div><input type="number" min="15" style={{ width: 80 }} value={s.prefs.syncIntervalSec} onChange={e => pref('syncIntervalSec', Number(e.target.value))} /> seconds in the background, <input type="number" min="10" style={{ width: 70 }} value={s.prefs.fastPollSec ?? 20} onChange={e => pref('fastPollSec', Number(e.target.value))} /> while Tomail is the active window</div></div>
+            <div className="frow"><label></label><small>IMAP accounts are also pushed to instantly by the server (IMAP IDLE).</small></div>
             <div className="frow"><label>Notifications</label><label><input type="checkbox" checked={s.prefs.notifications !== false} onChange={e => pref('notifications', e.target.checked)} /> <Icon name="bell" size={12} /> show a system notification for new inbox mail</label></div>
             <div className="frow"><label></label><label><input type="checkbox" checked={s.prefs.notifyWhenFocused !== false} onChange={e => pref('notifyWhenFocused', e.target.checked)} /> even while Tomail is the active window</label></div>
             <div className="frow"><label>Conversation view</label><label><input type="checkbox" checked={!!s.prefs.threaded} onChange={e => pref('threaded', e.target.checked)} /> group messages by conversation by default</label></div>
@@ -105,6 +107,7 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
             {showImap && <ImapForm toast={toast} onDone={() => { setShowImap(false); refreshAccounts(); }} />}
             <p className="muted">Google accounts sign in through your browser; Tomail never sees the password. Other providers (Outlook, Yahoo, iCloud, Fastmail, your own domain…) connect over IMAP/SMTP, usually with an app password. "All Inboxes" merges every account.</p>
           </>}
+          {tab === 'rules' && <RulesTab accounts={accounts} labels={labels} toast={toast} seed={ruleSeed} />}
           {tab === 'google' && <>
             <p><b>Use your own Google API client (optional).</b> Tomail releases ship with a built-in Google sign-in{info?.hasGoogleClient ? ' (present in this build)' : ' — but this build has none, so you need your own'}. You only need this if you build Tomail yourself or prefer your own Google Cloud project:</p>
             <ol>

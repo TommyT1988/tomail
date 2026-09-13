@@ -16,6 +16,10 @@ instant even for a 60,000-message inbox — and it still works when you're offli
 - **Notifications** for new inbox mail (click to open) and an unread badge on the dock / taskbar icon
 - **Dark mode** (system, light or dark), printing, search filters (from, to, dates, account, folder, unread, flagged, attachments)
 - Trash and Junk views offer Restore, Delete forever and Empty folder (Gmail needs "Grant full access" for permanent delete)
+- **Rules**: file, label, archive, flag, read, junk or trash new mail by sender, recipient, subject, body or attachment (Settings → Rules, or "Create rule from sender" in Quick Actions)
+- **Address autocomplete** in To/Cc/Bcc from the people you've written to and heard from
+- **Snooze follows you**: the wake time is stored on the server (a hidden Gmail label or an IMAP keyword), so every device running Tomail wakes the message
+- **Instant new mail** on IMAP accounts via IMAP IDLE; Gmail polls every 20 s while Tomail is the active window (60 s in the background). True Gmail push needs a Pub/Sub relay server, which a standalone app can't ship.
 - Instant local search (subject, sender, recipients, cached bodies) plus **Deep search** that runs Gmail's own
   search — full Gmail syntax, including inside attachments
 - Read / unread, flag, archive, delete, move to folder, junk / not junk — all applied instantly and synced to Gmail
@@ -96,7 +100,7 @@ test/                   unit tests for db, mime, batch parsing, sync and actions
 - Move follows Gmail semantics: add the target label, drop the label of the folder you were viewing.
 
 ## Roadmap
-Push notifications (Gmail Pub/Sub, IMAP IDLE) instead of polling, cross-device snooze, rules/filters, contacts autocomplete, code signing.
+Code signing, Microsoft OAuth for Outlook/365 IMAP, Google Contacts import, attachment previews, a proper app icon.
 
 Microsoft 365 / Outlook.com note: Microsoft has retired password sign-in for IMAP on most accounts, so those need an app password (where the tenant allows it) or OAuth support, which Tomail doesn't have yet.
 
