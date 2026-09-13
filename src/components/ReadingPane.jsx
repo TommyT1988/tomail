@@ -17,8 +17,15 @@ function BodyFrame({ html, allowRemote, autoHeight }) {
   const doc = useMemo(() => buildDoc(html, { allowRemote }), [html, allowRemote]);
   const [h, setH] = useState(140);
   const ref = useRef(null);
-  const measure = () => { try { const d = ref.current?.contentDocument; if (!d?.body) return; const hh = Math.max(d.body.scrollHeight, d.documentElement.scrollHeight); if (hh > 0) setH(Math.min(2400, Math.max(60, hh + 12))); } catch {} };
-  useEffect(() => { if (!autoHeight) return; const t = [50, 250, 1000].map(ms => setTimeout(measure, ms)); return () => t.forEach(clearTimeout); }, [doc, autoHeight]);
+  // Body height (not documentElement: that one tracks the frame's own viewport and would loop with the observer).
+  const measure = () => { try { const d = ref.current?.contentDocument; if (!d?.body) return; const hh = Math.ceil(d.body.getBoundingClientRect().height + 28); if (hh > 28) setH(cur => (Math.abs(cur - Math.min(2400, Math.max(60, hh))) > 2 ? Math.min(2400, Math.max(60, hh)) : cur)); } catch {} };
+  useEffect(() => {
+    if (!autoHeight) return;
+    // Re-measure while the frame lays out and images arrive (no ResizeObserver: observing a same-origin
+    // frame's body from the parent reports 'loop completed' errors when the frame itself is resized).
+    const timers = [50, 150, 300, 600, 1000, 1500, 2500, 4000, 6000].map(ms => setTimeout(measure, ms));
+    return () => timers.forEach(clearTimeout);
+  }, [doc, autoHeight]);
   return <iframe ref={ref} title="message" sandbox={autoHeight ? 'allow-same-origin allow-popups allow-popups-to-escape-sandbox' : 'allow-popups allow-popups-to-escape-sandbox'} srcDoc={doc} onLoad={measure} style={autoHeight ? { height: h } : undefined} />;
 }
 

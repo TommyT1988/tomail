@@ -198,7 +198,7 @@ a { color: var(--accent); }
 .thread .card .ch .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .thread .card.open .ch { border-bottom: 1px solid var(--border); }
 .thread .card .cb { display: flex; flex-direction: column; min-height: 80px; }
-.thread .card iframe { border: 0; width: 100%; min-height: 120px; background: #fff; }
+.thread .card iframe { flex: none; border: 0; width: 100%; min-height: 60px; background: #fff; }
 .thread .card .cb .plain { padding: 12px; white-space: pre-wrap; }
 .thread .card .cb .atts { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 12px; border-bottom: 1px solid var(--border); }
 .thread .card .cb .atts .att { border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; display: flex; gap: 6px; align-items: center; font-size: 12px; }

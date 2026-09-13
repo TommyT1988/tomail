@@ -1,5 +1,6 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage, Menu, Notification, nativeImage, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage, Menu, Notification, nativeImage, nativeTheme, protocol, net } = require('electron');
+const { pathToFileURL } = require('node:url');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -14,6 +15,21 @@ const { buildDoc } = require('./printDoc');
 const DEMO = process.env.MAIL_DEMO === '1';
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
+// The renderer is served from app://tomail/ rather than file:// so it has a real origin
+// (sandboxed same-origin message frames can be measured; storage is stable).
+protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false } }]);
+const DIST = path.join(__dirname, '..', 'dist');
+function registerAppProtocol() {
+  protocol.handle('app', (req) => {
+    const u = new URL(req.url);
+    let p = decodeURIComponent(u.pathname);
+    if (p === '/' || p === '') p = '/index.html';
+    const file = path.normalize(path.join(DIST, p));
+    if (!file.startsWith(DIST + path.sep) && file !== DIST) return new Response('forbidden', { status: 403 });
+    if (!fs.existsSync(file)) return new Response('not found', { status: 404 });
+    return net.fetch(pathToFileURL(file).toString());
+  });
+}
 app.setName('Tomail');
 app.setPath('userData', path.join(app.getPath('appData'), DEMO ? 'tomail-demo' : 'tomail'));
 if (process.platform === 'win32') app.setAppUserModelId('app.tomail.desktop');
@@ -76,7 +92,7 @@ function createWindow() {
   });
   win.once('ready-to-show', () => win.show());
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:|^mailto:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('http://localhost') && !url.startsWith('file:')) { e.preventDefault(); shell.openExternal(url); } });
+  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('http://localhost') && !url.startsWith('app://')) { e.preventDefault(); if (/^https?:|^mailto:/.test(url)) shell.openExternal(url); } });
   win.webContents.on('context-menu', (_e, params) => {
     if (!params.isEditable) return;
     const items = params.dictionarySuggestions.map(s => ({ label: s, click: () => win.webContents.replaceMisspelling(s) }));
@@ -85,7 +101,7 @@ function createWindow() {
     Menu.buildFromTemplate(items).popup();
   });
   const dev = process.env.VITE_DEV_SERVER_URL;
-  if (dev) win.loadURL(dev); else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  if (dev) win.loadURL(dev); else win.loadURL('app://tomail/index.html');
   win.on('closed', () => { win = null; });
   // Dev/CI hook: MAIL_SCREENSHOT=/dir → capture the window through a few states, then quit.
   if (process.env.MAIL_SCREENSHOT) {
@@ -212,6 +228,7 @@ function registerIpc() {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
+  registerAppProtocol();
   const userData = app.getPath('userData');
   settings = new Settings(path.join(userData, 'settings.json'));
   applyTheme();
