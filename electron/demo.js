@@ -18,7 +18,7 @@ function seedDemo(db) {
   const t = (h, m, daysAgo = 0) => { const d = new Date(today); d.setDate(d.getDate() - daysAgo); d.setHours(h, m, 0, 0); return d.getTime(); };
   const rows = [
     ['Northwind Supplies', 'orders@northwind.example', 'New stock: desk lamps, cable tidies and monitor arms', t(10, 1), 316000, false, ['INBOX', 'CATEGORY_PROMOTIONS'], true],
-    ["'PayFast' via Shop", 'shop@example.com', 'Tools built for business', t(10, 9), 66000, false, ['INBOX', 'CATEGORY_PROMOTIONS']],
+    ["'PayFast' via Shop", 'shop@example.com', 'Tools built for small businesses', t(10, 9), 66000, false, ['INBOX', 'CATEGORY_PROMOTIONS']],
     ['Auction Central', 'noreply@auctioncentral.example', 'Europe auctions are closing soon – place your bids now!', t(10, 22), 145000, false, ['INBOX', 'CATEGORY_PROMOTIONS']],
     ['Orbit Mobile', 'hello@orbitmobile.example', 'Your new rewards have landed, Alex', t(10, 41), 69000, true, ['INBOX', 'UNREAD', 'CATEGORY_PROMOTIONS']],
     ["'PayPal' via Shop", 'service@paypal.example', 'Receipt for your payment to Harbour Distribution', t(10, 41), 55000, false, ['INBOX', L['Finance/PayPal']]],
@@ -40,7 +40,7 @@ function seedDemo(db) {
     ['Sam Wood', 'sam@example.com', 'Rota for next week', t(9, 15, 1), 18000, true, ['INBOX', 'UNREAD', L['Family/Sam']]],
     ['Westgate Components', 'invoices@westgate.example', 'Invoice 100234', t(8, 5, 2), 210000, false, ['INBOX', L['Finance/Invoices']], true],
     ['Alex', 'alex@example.com', 'Re: Rota for next week', t(9, 40, 1), 4000, false, ['SENT']],
-    ['Prize Committee', 'prince@example.ru', 'URGENT business proposal', t(3, 0, 2), 9000, true, ['SPAM', 'UNREAD']],
+    ['Prize Committee', 'prize@example.ru', 'URGENT business proposal', t(3, 0, 2), 9000, true, ['SPAM', 'UNREAD']],
     ['Old Newsletter', 'news@old.example', 'Weekly digest', t(7, 0, 5), 50000, false, ['TRASH']],
   ];
   const msgs = rows.map((r, i) => {

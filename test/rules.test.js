@@ -11,9 +11,9 @@ test('rules: matching (all/any, ops) and planning', () => {
   assert.equal(matches(r, m), true);
   assert.equal(matches({ ...r, conditions: [...r.conditions, { field: 'hasAttachment', value: 'yes' }] }, m), false);
   assert.equal(matches({ ...r, match: 'any', conditions: [{ field: 'body', op: 'contains', value: 'nothing' }, { field: 'any', op: 'regex', value: 'parc.l' }] }, m), true);
-  const p = plan([r, { enabled: true, match: 'all', conditions: [{ field: 'from', op: 'contains', value: 'dpd' }], actions: [{ type: 'star' }] }], m);
+  const p = plan([r, { enabled: true, match: 'all', conditions: [{ field: 'from', op: 'contains', value: 'parcelio' }], actions: [{ type: 'star' }] }], m);
   assert.deepEqual([...p.add].sort(), ['L1', 'STARRED']); assert.deepEqual([...p.remove].sort(), ['INBOX', 'UNREAD']); assert.equal(p.matched.length, 2);
-  const stop = plan([{ ...r, actions: [{ type: 'archive' }, { type: 'stop' }] }, { enabled: true, match: 'all', conditions: [{ field: 'from', op: 'contains', value: 'dpd' }], actions: [{ type: 'star' }] }], m);
+  const stop = plan([{ ...r, actions: [{ type: 'archive' }, { type: 'stop' }] }, { enabled: true, match: 'all', conditions: [{ field: 'from', op: 'contains', value: 'parcelio' }], actions: [{ type: 'star' }] }], m);
   assert.equal(stop.matched.length, 1, 'stop halts later rules');
   assert.equal(plan([{ ...r, accountId: 2 }], m).matched.length, 0, 'account-scoped rule ignores other accounts');
 });
@@ -21,7 +21,7 @@ test('rules: matching (all/any, ops) and planning', () => {
 test('rules: runRules groups identical changes and applies through actions.modify', async () => {
   const db = new MailDb(':memory:');
   const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
-  db.saveRule({ name: 'dpd', enabled: true, match: 'all', conditions: [{ field: 'from', op: 'contains', value: 'dpd' }], actions: [{ type: 'moveTo', labelId: 'L1' }] });
+  db.saveRule({ name: 'dpd', enabled: true, match: 'all', conditions: [{ field: 'from', op: 'contains', value: 'parcelio' }], actions: [{ type: 'moveTo', labelId: 'L1' }] });
   const rows = ['m1', 'm2', 'm3'].map((id, i) => ({ id, threadId: id, internalDate: i, size: 1, snippet: '', subject: 's', fromName: '', fromEmail: i < 2 ? 'x@parcelio.example' : 'y@other', to: [], cc: [], labels: ['INBOX'] }));
   db.upsertMessages(a.id, rows);
   const calls = [];

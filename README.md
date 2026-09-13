@@ -1,116 +1,147 @@
-# Tomail
+<p align="center"><img src="build/icon-256.png" width="96" alt="Tomail"></p>
+<h1 align="center">Tomail</h1>
+<p align="center">A fast, keyboard-friendly desktop email client for Gmail, Google Workspace and any IMAP mailbox.<br>Windows · macOS · Linux</p>
 
-A fast, keyboard-friendly desktop email client for **Gmail, Google Workspace and any IMAP mailbox** (Outlook, Yahoo, iCloud, Fastmail, your own domain…), for Windows, macOS and Linux.
+<p align="center"><img src="docs/screenshots/inbox.png" width="800" alt="Tomail inbox"></p>
 
-Three-pane layout: folders and labels on the left (favourites, per-account system folders, nested labels),
-a message list with Primary / Promotions / Social tabs grouped by day, and a reading pane below.
-Every account is mirrored into a local database, so folder views, unread counts and search are
-instant even for a 60,000-message inbox — and it still works when you're offline.
+Tomail keeps a local copy of your mail, so folders, unread counts and search are instant even on a 60,000-message inbox, and it works when you're offline. Everything you do (read, flag, archive, move, snooze, rules) is applied to your provider too, so your phone and webmail stay in step.
 
-## Features
-- Google accounts (sign in with your browser) and IMAP/SMTP accounts (server settings looked up automatically), any mix, with a merged **All Inboxes** view
-- **Conversation view** (toggle in the list header): one row per thread, messages stacked in the reading pane
-- **Drafts** auto-save as you type and are mirrored to the server's Drafts folder, so you can finish them elsewhere
-- **Compose opens in its own window** (move, minimise, resize; several at once); closing it saves the draft
-- **Rich-text compose**: bold/italic/underline, lists, quotes, links, pasted or inserted images; per-account signatures
-- **Calendar invites** show as a card with Accept / Maybe / Decline (sends the reply to the organiser)
-- **Notifications** for new inbox mail (click to open) and an unread badge on the dock / taskbar icon
-- **Dark mode** (system, light or dark), printing, search filters (from, to, dates, account, folder, unread, flagged, attachments)
-- Trash and Junk views offer Restore, Delete forever and Empty folder (Gmail needs "Grant full access" for permanent delete)
-- **Rules**: file, label, archive, flag, read, junk or trash new mail by sender, recipient, subject, body or attachment (Settings → Rules, or "Create rule from sender" in Quick Actions)
-- **Address autocomplete** in To/Cc/Bcc from the people you've written to and heard from
-- **Snooze follows you**: the wake time is stored on the server (a hidden Gmail label or an IMAP keyword), so every device running Tomail wakes the message
-- **Undo** after archive, delete, move and junk, and an undo-send delay (default 5 s) after pressing Send
-- **Outbox**: with no connection, sent mail waits and goes out automatically when you're back online
-- **Open a message in its own window** (o), attachment previews for images and PDFs inline
-- **Folder management** from the sidebar's right-click menu: rename, delete, colour, new subfolder
-- **Search operators** in the search box: `from:` `to:` `in:` `is:unread` `is:flagged` `has:attachment` `after:` `before:`; press `?` for the shortcut list
-- **Report a problem** (Settings → General) opens a GitHub issue with the version and recent log attached, addresses redacted; the log file lives in the data folder
-- **Housekeeping**: optional "keep downloaded bodies for N days" and weekly database compaction
-- **Instant new mail** on IMAP accounts via IMAP IDLE; Gmail polls every 20 s while Tomail is the active window (60 s in the background). True Gmail push needs a Pub/Sub relay server, which a standalone app can't ship.
-- Instant local search (subject, sender, recipients, cached bodies) plus **Deep search** that runs Gmail's own
-  search — full Gmail syntax, including inside attachments
-- Read / unread, flag, archive, delete, move to folder, junk / not junk — all applied instantly and synced to Gmail
-- **Snooze** (later today, tomorrow, weekend, next week, or pick a time)
-- Compose, reply, reply all, forward (with the original attachments), file attachments, signature
-- Remote images blocked by default (per-message "Load images"), HTML rendered in a sandbox, links open in your browser
-- Keyboard: ↑/↓ move · Delete = trash · e = archive · u = read/unread · s = flag · r / a / f = reply / reply all / forward · n = new
-- Automatic updates from GitHub Releases
+## Download
 
-IMAP accounts get the same features. Folders appear as labels, flags map to read/flagged, and moving between folders is what archive, junk, snooze and "move to" do underneath. Message ids are `folder::uid`, and a move re-keys the local row so cached bodies survive.
+Grab the installer for your machine from the **[latest release](https://github.com/TommyT1988/tomail/releases/latest)**:
 
-Tomail asks Google for the `gmail.modify` scope only: read, label, archive, trash and send.
-It never requests permanent-delete access, and your Google password never passes through the app.
-Sign-in tokens are stored encrypted with your operating system's keychain.
+| Platform | File |
+|---|---|
+| Windows (x64) | `Tomail-x.y.z-win-x64.exe` |
+| Windows on ARM | `Tomail-x.y.z-win-arm64.exe` |
+| macOS, Apple Silicon | `Tomail-x.y.z-mac-arm64.dmg` |
+| macOS, Intel | `Tomail-x.y.z-mac-x64.dmg` |
+| Linux (x64) | `Tomail-x.y.z-linux-x86_64.AppImage` or `-linux-amd64.deb` |
+| Linux (ARM64) | `Tomail-x.y.z-linux-arm64.AppImage` or `-linux-arm64.deb` |
 
-## Install
-Download the installer for your platform from the [Releases](https://github.com/TommyT1988/tomail/releases) page:
-Windows `-win-x64.exe` / `-win-arm64.exe`, macOS `-mac-x64.dmg` (Intel) / `-mac-arm64.dmg` (Apple Silicon), Linux `-linux-x86_64.AppImage` or `-linux-arm64.AppImage` (plus `.deb` for both).
+Installers aren't code-signed yet, so the first launch shows a warning: on Windows click **More info → Run anyway**; on macOS right-click the app and choose **Open**. On Linux, `chmod +x` the AppImage and run it, or add it to your app menu with [Gear Lever](https://flathub.org/apps/it.mijorus.gearlever). Tomail updates itself from these releases.
 
-> Builds are not code-signed yet. Windows SmartScreen and macOS Gatekeeper will warn on first launch
-> ("More info → Run anyway" / right-click → Open).
+## First run
 
-Then click **Sign in with Google**. The newest mail appears within seconds; the rest of the mailbox
-downloads in the background (roughly 50 messages per second) and resumes if you close the app.
+Click **Sign in with Google** and sign in through your browser. Tomail asks only for `gmail.modify` (read, label, archive, trash, send) and never for permanent delete unless you grant it separately later. Your password never passes through the app, and tokens are kept in your operating system's keychain.
+
+For any other provider, **Settings → Accounts → Add other account (IMAP)**: type the address, and Tomail looks up the server settings (built-in list of major providers plus Mozilla's provider database). Yahoo, iCloud, Fastmail and Gmail-over-IMAP need an app password. Outlook.com and Microsoft 365 have mostly retired password sign-in for IMAP, so they need an app password where the tenant allows it; Microsoft OAuth is on the roadmap.
+
+> **Google verification status.** Tomail's Google app is currently in *Testing* mode: only addresses on the tester list can sign in, and Google expires those sign-ins every 7 days (Tomail shows a "Sign in again" button). Lifting that requires Google's verification review. IMAP accounts have no such limit.
+
+## What it does
+
+**Reading**
+- Three-pane layout: folders and labels on the left, message list with Primary / Promotions / Social tabs grouped by day, reading pane below with a draggable divider
+- Conversation view (toggle in the list header) stacks a thread as cards
+- Open any message in its own window (`o`), or print it (`p`)
+- Remote images blocked by default with a per-message "Load images"; HTML rendered in a sandbox; links open in your browser
+- Attachment previews: inline image thumbnails, a viewer for images, PDFs and text
+- Calendar invitations show as a card with Accept / Maybe / Decline that replies to the organiser
+
+<p align="center"><img src="docs/screenshots/conversation.png" width="800" alt="Conversation view"></p>
+
+**Triage**
+- Read / unread, flag, archive, delete, move, junk, all instant and synced, with **Undo**
+- **Snooze** (later today, tomorrow, weekend, next week, or a time); the wake time is stored on the server so every device running Tomail wakes it
+- **Rules**: file, label, archive, flag, read, junk or trash new mail by sender, recipient, subject, body or attachment; "Create rule from sender" in Quick Actions
+- Trash and Junk offer Restore, Delete forever and Empty folder
+- Sortable columns; drag accounts into your preferred order; right-click folders to rename, delete, colour or add subfolders
+
+**Writing**
+- Compose opens in its own window: reply, reply all, forward (with original attachments), new
+- Rich text: bold, italic, underline, lists, quotes, links, pasted or inserted images
+- Address autocomplete from the people you write to and hear from
+- Drafts auto-save and are mirrored to your provider's Drafts folder, so you can finish them elsewhere
+- Undo send: a countdown after pressing Send (default 5 s)
+- Outbox: no connection? The message waits and goes out when you're back online
+- Per-account signatures
+
+<p align="center"><img src="docs/screenshots/compose.png" width="700" alt="Compose window"></p>
+
+**Search**
+- Instant local search across subject, sender, recipients and downloaded bodies
+- Operators: `from:` `to:` `subject:` `in:folder` `is:unread` `is:flagged` `has:attachment` `after:2026-01-01` `before:2026-02-01`, plus a Filters menu
+- **Deep search** runs the query on the server (Gmail syntax, inside attachments for Gmail)
+
+**Everything else**
+- Multiple accounts of either kind with a merged All Inboxes view
+- New-mail notifications (click to open) and an unread badge on the dock / taskbar icon
+- IMAP accounts get pushed to instantly (IMAP IDLE); Gmail polls every 20 s while Tomail is the active window, 60 s in the background
+- Dark mode (system, light or dark)
+- Automatic updates
+- Housekeeping: optionally keep downloaded bodies for 30 / 90 / 365 days; weekly database compaction
+- Something wrong? **Settings → Report a problem** opens a GitHub issue with the version and recent log attached (email addresses redacted)
+
+<p align="center"><img src="docs/screenshots/dark.png" width="800" alt="Dark mode"></p>
+
+### Keyboard
+
+| Key | Action |
+|---|---|
+| ↑ / ↓ | Move selection |
+| Double-click | Reply |
+| r / a / f | Reply / Reply all / Forward |
+| n | New message |
+| o | Open message in a window |
+| e | Archive |
+| Delete | Move to Trash |
+| u | Read / unread |
+| s | Flag / unflag |
+| p | Print |
+| Esc | Clear selection / close |
+| ? | Show all shortcuts |
+
+## Privacy
+
+Mail is stored only on your computer, in an SQLite database under the app's data folder (shown in Settings). Tomail talks to Google or your IMAP server directly; there is no Tomail server, no telemetry, and nothing is sent anywhere except the mail you send. Tracking pixels don't fire unless you load a message's images. "Report a problem" only opens a browser tab with text you can edit before submitting.
 
 ## Build it yourself
+
 ```
 git clone https://github.com/TommyT1988/tomail && cd tomail
 npm install
 npm run dev              # Vite dev server + Electron, live reload
 npm start                # build the renderer and run Electron against it
-MAIL_DEMO=1 npm start    # sample mailbox, no Google connection
-npm test                 # unit tests (node:test)
+MAIL_DEMO=1 npm start    # sample mailbox, no account needed
+npm test                 # unit tests
 npm run dist             # installers into release/
 ```
 
-**Google sign-in for your own build.** Releases carry a built-in Google OAuth client. Your own build won't, so either:
-- create a *Desktop app* OAuth client in [Google Cloud Console](https://console.cloud.google.com/apis/library/gmail.googleapis.com)
-  (enable the Gmail API; consent screen **Internal** for Workspace, or External with yourself as a test user) and export
-  `TOMAIL_GOOGLE_CLIENT_ID` / `TOMAIL_GOOGLE_CLIENT_SECRET` before `npm run oauth:client`, or
-- paste the same values in the app under **Settings → Advanced**.
+Your own build has no built-in Google sign-in. Either create a *Desktop app* OAuth client in [Google Cloud Console](https://console.cloud.google.com/apis/library/gmail.googleapis.com) (enable the Gmail API; consent screen Internal for Workspace or External with yourself as a test user) and export `TOMAIL_GOOGLE_CLIENT_ID` / `TOMAIL_GOOGLE_CLIENT_SECRET` before `npm run oauth:client`, or paste them in the app under **Settings → Advanced**. IMAP accounts work without any of this.
 
 On a headless Linux box the demo can be exercised under Xvfb:
 `env -u ELECTRON_RUN_AS_NODE MAIL_DEMO=1 MAIL_SCREENSHOT=/tmp/shots xvfb-run -a ./node_modules/electron/dist/electron . --no-sandbox`
-(VS Code terminals export `ELECTRON_RUN_AS_NODE=1`, which turns the Electron binary into plain Node — unset it.)
+(VS Code terminals export `ELECTRON_RUN_AS_NODE=1`, which turns the Electron binary into plain Node.)
 
-## Releasing
-1. Add repository secrets `TOMAIL_GOOGLE_CLIENT_ID` and `TOMAIL_GOOGLE_CLIENT_SECRET`.
-2. Bump `version` in `package.json`, commit, tag `vX.Y.Z`, push the tag.
-3. The **Release** workflow builds all three platforms and attaches installers to a GitHub Release; installed copies pick it up automatically.
+### Releasing
 
-### Google verification (read this before publishing widely)
-`gmail.modify` is a **restricted** scope. While the OAuth consent screen is in *Testing* mode Google allows up to
-100 test users and expires their sign-in every 7 days (Tomail shows a "Sign in again" button when that happens).
-To remove those limits the app must pass Google's OAuth verification, which for restricted Gmail scopes includes an
-annual third-party CASA security assessment. Plan for that before promoting Tomail beyond a test group.
+Bump `version` in `package.json`, commit, tag `vX.Y.Z` and push the tag. The Release workflow builds every platform and attaches installers to a GitHub Release; installed copies update themselves. The repository secrets `TOMAIL_GOOGLE_CLIENT_ID` / `TOMAIL_GOOGLE_CLIENT_SECRET` supply the built-in Google client. The repo must stay public for auto-update to reach the release files.
 
-## How it works
+## How it's built
+
+Electron 44 (Node 24) · React 19 + Vite · SQLite via `node:sqlite` with FTS5 · imapflow / mailparser / nodemailer. No UI libraries; icons are inline SVG. No native modules to compile.
+
 ```
-electron/main.js        app lifecycle, window, IPC, sync scheduler, snooze timer, auto-update
-electron/preload.cjs    contextBridge → window.mail.*  (the renderer never touches the network or database)
-electron/db.js          SQLite (node:sqlite, bundled with Electron) schema + queries + FTS5 search
-electron/accounts.js    token storage (safeStorage-encrypted) + per-account Gmail client
-electron/actions.js     every user action: optimistic local change → Gmail call → revert on failure
-electron/gmail/oauth.js PKCE loopback OAuth for a Google "Desktop app" client
-electron/gmail/api.js   Gmail REST client: refresh on 401, backoff on 429/5xx, multipart batch GETs
-electron/gmail/sync.js  resumable newest-first initial sync (metadata only) + history.list increments
-electron/gmail/mime.js  Gmail payload → text/html/attachments; outgoing → RFC 2822
-src/                    React renderer (no UI libraries; icons are inline SVG)
-test/                   unit tests for db, mime, batch parsing, sync and actions
+electron/main.js          app lifecycle, windows (main, compose, message, preview), IPC, sync scheduler, undo-send queue, housekeeping
+electron/preload.cjs      contextBridge → window.mail.*  (the renderer never touches the network or database)
+electron/db.js            SQLite schema + queries: messages, labels, threads, drafts, rules, contacts, outbox, FTS
+electron/accounts.js      encrypted secret storage, Gmail token refresh, provider factory
+electron/providers/       gmail.js (REST + history sync) · imap.js (folders as labels, IDLE push, keyword snooze)
+electron/actions.js       every user action: optimistic local change → provider → revert on failure
+electron/rules.js         rules engine · electron/calendar.js  iCalendar parse/reply · electron/logger.js  rotating log
+src/                      React renderer: App, Sidebar, MessageList, ReadingPane, Compose, RichEditor, Settings, Rules…
+test/                     node:test suite (db, mime, batch parsing, sync, actions, threads, rules, contacts, outbox, search)
 ```
-- Initial sync pins the history cursor, then walks `messages.list` newest-first in batches of 50 (metadata only).
-  Bodies download on first open and are cached. Incremental sync runs every 60 s via `history.list`; an expired
-  history (404) triggers a clean resync.
-- Snooze removes `INBOX`, adds a `Snoozed` label (created on demand) and stores the wake time locally; a timer
-  puts the message back in the inbox, unread. The timer lives on the PC that snoozed it.
-- Primary = inbox messages with no `CATEGORY_*` label; Promotions/Social follow Gmail's own categorisation.
-- Move follows Gmail semantics: add the target label, drop the label of the folder you were viewing.
+
+- **Sync.** Gmail: a resumable newest-first initial pass (headers only) then `history.list` increments, paced by a quota budget under Google's 15,000 units/minute. IMAP: per-folder resumable backfill, CONDSTORE flag deltas, UID-diff deletions, IDLE on the inbox. Bodies download on first open and are cached.
+- **Labels everywhere.** IMAP folders map onto the same label ids the Gmail provider uses (`INBOX`, `SENT`, `TRASH`, `SPAM`, `DRAFT`, `ARCHIVE`), flags onto `UNREAD` / `STARRED`, and a label change becomes a move; message ids are `folder::uid` and a move re-keys the local row so cached bodies survive.
+- **Snooze** stores the wake time as a hidden Gmail label (`Tomail/until/…`) or an IMAP keyword (`$TomailUntil…`).
 
 ## Roadmap
-Code signing, Microsoft OAuth for Outlook/365 IMAP, Google Contacts import.
 
-Microsoft 365 / Outlook.com note: Microsoft has retired password sign-in for IMAP on most accounts, so those need an app password (where the tenant allows it) or OAuth support, which Tomail doesn't have yet.
+Code signing · Microsoft OAuth for Outlook / 365 · Google Contacts import · Google verification for public use.
 
 ## License
+
 MIT — see [LICENSE](LICENSE).
