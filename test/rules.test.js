@@ -66,3 +66,12 @@ test('housekeeping: pruneBodies keeps flagged/snoozed and recent bodies', () => 
   assert.equal(db.listMessages({ kind: 'search', q: 'wombat' }).length, 1, 'flagged body still indexed');
   assert.equal(db.stats().bodies, 2);
 });
+
+test('contacts: Google import overrides harvested names and ranks them', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  db.upsertMessages(a.id, [{ id: 'r', threadId: 'r', internalDate: 1, size: 1, snippet: '', subject: '', fromName: 'bob', fromEmail: 'bob@y.com', to: [], cc: [], labels: ['INBOX'] }]);
+  assert.equal(db.upsertGoogleContacts([{ name: 'Robert Jones', email: 'Bob@Y.com' }, { name: 'Zoe', email: 'zoe@z.com' }, { name: '', email: '' }]), 2);
+  const bob = db.searchContacts('bob')[0]; assert.equal(bob.name, 'Robert Jones'); assert.equal(bob.source, 'google'); assert.equal(bob.recv_count, 1, 'mail counts kept');
+  assert.deepEqual(db.contactStats(), { total: 2, google: 2 });
+});

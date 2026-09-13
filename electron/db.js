@@ -130,7 +130,8 @@ CREATE TABLE IF NOT EXISTS contacts (
   name TEXT,
   sent_count INTEGER NOT NULL DEFAULT 0,
   recv_count INTEGER NOT NULL DEFAULT 0,
-  last_used INTEGER NOT NULL DEFAULT 0
+  last_used INTEGER NOT NULL DEFAULT 0,
+  source TEXT
 );
 CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY,
@@ -172,7 +173,7 @@ class MailDb {
     add('accounts', 'kind', "TEXT NOT NULL DEFAULT 'gmail'"); add('accounts', 'imap_json', 'TEXT'); add('accounts', 'signature', 'TEXT'); add('accounts', 'scopes', 'TEXT');
     add('labels', 'imap_path', 'TEXT');
     add('messages', 'answered', 'INTEGER NOT NULL DEFAULT 0'); add('messages', 'calendar_json', 'TEXT');
-    add('drafts', 'remote_message_id', 'TEXT'); add('messages', 'imap_folder', 'TEXT'); add('messages', 'imap_uid', 'INTEGER');
+    add('drafts', 'remote_message_id', 'TEXT'); add('contacts', 'source', 'TEXT'); add('messages', 'imap_folder', 'TEXT'); add('messages', 'imap_uid', 'INTEGER');
   }
   prep(sql) {
     let s = this._stmts.get(sql);
@@ -259,9 +260,18 @@ class MailDb {
   }
   searchContacts(q, limit = 8) {
     const like = '%' + String(q || '').toLowerCase() + '%';
-    return this.prep(`SELECT email, name, sent_count, recv_count, last_used FROM contacts WHERE email LIKE ? OR lower(name) LIKE ?
-      ORDER BY (sent_count * 5 + recv_count) DESC, last_used DESC LIMIT ?`).all(like, like, limit);
+    return this.prep(`SELECT email, name, sent_count, recv_count, last_used, source FROM contacts WHERE email LIKE ? OR lower(name) LIKE ?
+      ORDER BY (sent_count * 5 + recv_count + CASE WHEN source = 'google' THEN 4 ELSE 0 END) DESC, last_used DESC LIMIT ?`).all(like, like, limit);
   }
+  /** Google address book: names win over harvested ones; rows are marked source='google'. */
+  upsertGoogleContacts(rows) {
+    const up = this.prep(`INSERT INTO contacts (email, name, sent_count, recv_count, last_used, source) VALUES (?,?,0,0,0,'google')
+      ON CONFLICT(email) DO UPDATE SET name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE contacts.name END, source = 'google'`);
+    let n = 0;
+    this.tx(() => { for (const r of rows) { if (!r.email) continue; up.run(r.email.toLowerCase(), r.name || ''); n++; } });
+    return n;
+  }
+  contactStats() { const r = this.prep(`SELECT count(*) AS total, sum(CASE WHEN source = 'google' THEN 1 ELSE 0 END) AS google FROM contacts`).get(); return { total: r.total, google: r.google || 0 }; }
   // ── rules ──
   listRules() { return this.prep('SELECT * FROM rules ORDER BY position, id').all().map(rowToRule); }
   saveRule(r) {

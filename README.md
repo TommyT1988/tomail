@@ -51,7 +51,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 **Writing**
 - Compose opens in its own window: reply, reply all, forward (with original attachments), new
 - Rich text: bold, italic, underline, lists, quotes, links, pasted or inserted images
-- Address autocomplete from the people you write to and hear from
+- Address autocomplete from the people you write to and hear from, plus **Google Contacts** import (Settings → Accounts; asks for read-only contacts access once, refreshes daily)
 - Drafts auto-save and are mirrored to your provider's Drafts folder, so you can finish them elsewhere
 - Undo send: a countdown after pressing Send (default 5 s)
 - Outbox: no connection? The message waits and goes out when you're back online
@@ -108,6 +108,8 @@ npm test                 # unit tests
 npm run dist             # installers into release/
 ```
 
+Google Contacts import additionally needs the **People API** enabled on the same Cloud project and the two `contacts.readonly` / `contacts.other.readonly` scopes on the consent screen.
+
 Your own build has no built-in Google sign-in. Either create a *Desktop app* OAuth client in [Google Cloud Console](https://console.cloud.google.com/apis/library/gmail.googleapis.com) (enable the Gmail API; consent screen Internal for Workspace or External with yourself as a test user) and export `TOMAIL_GOOGLE_CLIENT_ID` / `TOMAIL_GOOGLE_CLIENT_SECRET` before `npm run oauth:client`, or paste them in the app under **Settings → Advanced**. IMAP accounts work without any of this.
 
 On a headless Linux box the demo can be exercised under Xvfb:
@@ -140,7 +142,7 @@ test/                     node:test suite (db, mime, batch parsing, sync, action
 
 ## Roadmap
 
-Code signing · Microsoft OAuth for Outlook / 365 · Google Contacts import · Google verification for public use.
+Code signing · Microsoft OAuth for Outlook / 365 · Google verification for public use.
 
 ## License
 

@@ -62,9 +62,10 @@ class AccountManager {
     return c;
   }
   /** Interactive Google sign-in. fullAccess grants https://mail.google.com/ (permanent delete). */
-  async add({ openUrl, fullAccess = false }) {
+  async add({ openUrl, fullAccess = false, contacts = false, loginHint } = {}) {
     const { clientId, clientSecret } = this.oauthConfig;
-    const tokens = await oauth.authorize({ clientId, clientSecret, openUrl, scopes: fullAccess ? oauth.SCOPES_FULL : oauth.SCOPES });
+    const scopes = [...(fullAccess ? oauth.SCOPES_FULL : oauth.SCOPES), ...(contacts ? oauth.SCOPES_CONTACTS : [])];
+    const tokens = await oauth.authorize({ clientId, clientSecret, openUrl, scopes, loginHint });
     const tmp = new GmailClient({ getAccessToken: async () => tokens.access_token, forceRefresh: async () => tokens.access_token });
     const prof = await tmp.get('/profile');
     const email = prof.emailAddress.toLowerCase();

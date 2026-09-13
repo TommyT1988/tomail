@@ -28,7 +28,7 @@ const api = {
     respondInvite: (accountId, id, partstat) => call('actions:respondInvite', accountId, id, partstat), undo: (ids, inverse) => call('actions:undo', ids, inverse),
   },
   rules: { list: () => call('rules:list'), save: (r) => call('rules:save', r), remove: (id) => call('rules:remove', id), run: (accountId, labelId) => call('rules:run', accountId, labelId) },
-  contacts: { search: (q) => call('contacts:search', q) },
+  contacts: { search: (q) => call('contacts:search', q), stats: () => call('contacts:stats'), importGoogle: (accountId) => call('contacts:importGoogle', accountId) },
   drafts: { list: () => call('drafts:list'), get: (id) => call('drafts:get', id), save: (d) => call('drafts:save', d), remove: (id) => call('drafts:remove', id), openRemote: (accountId, messageId) => call('drafts:openRemote', accountId, messageId) },
   attachments: { save: (a, m, att) => call('attachments:save', a, m, att), open: (a, m, att) => call('attachments:open', a, m, att), data: (a, m, att) => call('attachments:data', a, m, att), preview: (a, m, att) => call('attachments:preview', a, m, att) },
   compose: { pickFiles: () => call('compose:pickFiles'), open: (payload) => call('compose:open', payload), payload: (id) => call('compose:payload', id), closeNow: (id) => call('compose:closeNow', id) },

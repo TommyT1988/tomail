@@ -11,6 +11,8 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const SCOPES = ['https://www.googleapis.com/auth/gmail.modify'];
 // Opt-in: full access additionally allows permanent delete / empty trash.
 const SCOPES_FULL = ['https://mail.google.com/'];
+// People API, for importing the address book (sensitive scopes: need Google verification for public use).
+const SCOPES_CONTACTS = ['https://www.googleapis.com/auth/contacts.readonly', 'https://www.googleapis.com/auth/contacts.other.readonly'];
 
 function b64url(buf) { return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 
@@ -46,7 +48,7 @@ function authorize({ clientId, clientSecret, openUrl, timeoutMs = 5 * 60 * 1000,
       const u = new URL(AUTH_URL);
       u.search = new URLSearchParams({
         client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: scopes.join(' '),
-        access_type: 'offline', prompt: 'consent select_account', code_challenge: challenge, code_challenge_method: 'S256',
+        access_type: 'offline', prompt: 'consent select_account', include_granted_scopes: 'true', code_challenge: challenge, code_challenge_method: 'S256',
         state, ...(loginHint ? { login_hint: loginHint } : {}),
       }).toString();
       Promise.resolve(openUrl(u.toString())).catch(e => { cleanup(); reject(e); });
@@ -81,4 +83,4 @@ function page(title, msg) {
   return `<!doctype html><meta charset=utf-8><title>${title}</title><body style="font-family:system-ui;padding:40px;color:#222"><h2>${title}</h2><p>${msg}</p>`;
 }
 
-module.exports = { authorize, refresh, SCOPES, SCOPES_FULL };
+module.exports = { authorize, refresh, SCOPES, SCOPES_FULL, SCOPES_CONTACTS };

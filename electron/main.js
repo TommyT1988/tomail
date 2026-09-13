@@ -229,6 +229,11 @@ function queueSend(payload) {
   return id;
 }
 function housekeeping() {
+  for (const a of db.listAccounts()) {
+    if (a.kind !== 'gmail' || !/auth\/contacts\.readonly/.test(a.scopes || '')) continue;
+    if (Date.now() - (db.kvGet('contactsImportedAt:' + a.id) || 0) < 20 * 3600000) continue;
+    accounts.provider(a.id).importContacts().then(r => log(`contacts: refreshed ${r.imported} from ${a.email}`)).catch(e => log('contacts refresh:', e.message));
+  }
   try {
     const days = settings.get().prefs.bodyRetentionDays || 0;
     if (days) { const n = db.pruneBodies(days); if (n) log(`housekeeping: cleared ${n} cached bodies older than ${days} days`); }
@@ -341,6 +346,19 @@ function registerIpc() {
     return { scanned: ids.length, applied: res.applied };
   });
   handle('contacts:search', (q) => db.searchContacts(q));
+  handle('contacts:stats', () => ({ ...db.contactStats(), accounts: Object.fromEntries(db.listAccounts().filter(a => a.kind === 'gmail').map(a => [a.id, { granted: /auth\/contacts\.readonly/.test(a.scopes || ''), importedAt: db.kvGet('contactsImportedAt:' + a.id) }])) }));
+  handle('contacts:importGoogle', async (accountId) => {
+    if (DEMO) throw new Error('Demo mode');
+    const a = db.getAccount(accountId); if (!a || a.kind !== 'gmail') throw new Error('Not a Google account');
+    let p = accounts.provider(accountId);
+    if (!p.hasContactsScope) {
+      // one-time re-consent adding the People API scopes (include_granted_scopes keeps Gmail access)
+      await accounts.add({ openUrl: (u) => shell.openExternal(u), contacts: true, fullAccess: /mail\.google\.com/.test(a.scopes || ''), loginHint: a.email });
+      accounts.forget(accountId); p = accounts.provider(accountId);
+      if (!p.hasContactsScope) throw new Error('Google did not grant contacts access — make sure the contacts permission is ticked on the consent screen.');
+    }
+    const r = await p.importContacts(); notifyChanged(); return r;
+  });
   handle('drafts:get', (id) => actions.getDraft(id));
   handle('drafts:save', (d) => actions.saveDraft(d));
   handle('drafts:remove', (id) => actions.deleteDraft(id));

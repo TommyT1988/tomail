@@ -89,6 +89,33 @@ class GmailProvider {
       for (const id of this.db.labelIds(this.accountId, l.id)) this.db.adoptSnooze(this.accountId, id, ts);
     }
   }
+  get hasContactsScope() { const a = this.db.getAccount(this.accountId); return /auth\/contacts\.readonly/.test(a?.scopes || ''); }
+  /** People API: saved contacts + "other contacts" (people you've corresponded with). */
+  async importContacts() {
+    const rows = [];
+    const pull = async (path, listKey, extra) => {
+      let pageToken;
+      do {
+        let j;
+        try { j = await this.client.request('GET', path, { query: { ...extra, pageSize: 1000, pageToken }, cost: 1 }); }
+        catch (e) {
+          if (e.status === 403 && /People API has not been used|accessNotConfigured|SERVICE_DISABLED/i.test(JSON.stringify(e.body || e.message))) { const err = new Error('The People API is not enabled for this Google Cloud project — enable it at console.cloud.google.com/apis/library/people.googleapis.com and try again.'); err.code = 'PEOPLE_API'; throw err; }
+          if (e.status === 403 && listKey === 'otherContacts') return; // other-contacts scope not granted — fine
+          throw e;
+        }
+        for (const p of j[listKey] || []) {
+          const name = (p.names || []).find(n => n.metadata?.primary)?.displayName || p.names?.[0]?.displayName || '';
+          for (const em of p.emailAddresses || []) if (em.value) rows.push({ name, email: em.value });
+        }
+        pageToken = j.nextPageToken;
+      } while (pageToken);
+    };
+    await pull('https://people.googleapis.com/v1/people/me/connections', 'connections', { personFields: 'names,emailAddresses' });
+    await pull('https://people.googleapis.com/v1/otherContacts', 'otherContacts', { readMask: 'names,emailAddresses' });
+    const n = this.db.upsertGoogleContacts(rows);
+    this.db.kvSet('contactsImportedAt:' + this.accountId, Date.now());
+    return { imported: n };
+  }
   get canDeleteForever() { const a = this.db.getAccount(this.accountId); return /mail\.google\.com/.test(a?.scopes || ''); }
   async deleteForever(ids) {
     if (!this.canDeleteForever) { const e = new Error('Permanent delete needs full Gmail access — Settings → Accounts → "Grant full access" and sign in again. (Gmail empties Trash itself after 30 days.)'); e.code = 'SCOPE'; throw e; }

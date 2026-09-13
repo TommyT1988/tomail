@@ -51,6 +51,11 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
   const [showImap, setShowImap] = useState(false);
   const [sigEdit, setSigEdit] = useState(null);
   const [dbInfo, setDbInfo] = useState(null);
+  const [contacts, setContacts] = useState(null);
+  const [importing, setImporting] = useState(null);
+  const loadContacts = () => window.mail.contacts.stats().then(setContacts).catch(() => {});
+  useEffect(() => { loadContacts(); }, [accounts]);
+  const importContacts = async (a) => { setImporting(a.id); try { const r = await window.mail.contacts.importGoogle(a.id); toast(`Imported ${r.imported} Google contacts`); await refreshAccounts(); loadContacts(); } catch (e) { toast(e.message, true); } finally { setImporting(null); } };
   const [problem, setProblem] = useState('');
   useEffect(() => { window.mail.app.dbInfo().then(setDbInfo).catch(() => {}); }, []);
   useEffect(() => { window.mail.settings.get().then(setS); }, []);
@@ -104,6 +109,7 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
                 <button title="Move down" disabled={i === accounts.length - 1} onClick={async () => { const ids = accounts.map(x => x.id); ids.splice(i, 1); ids.splice(i + 1, 0, a.id); await window.mail.accounts.reorder(ids); refreshAccounts(); }}>▼</button>
                 <button onClick={() => setSigEdit(sigEdit === a.id ? null : a.id)}>Signature</button>
                 <button onClick={async () => { const n = prompt('Display name (used in From):', a.display_name || ''); if (n != null) { await window.mail.accounts.rename(a.id, n); refreshAccounts(); } }}>Rename</button>
+                {a.kind !== 'imap' && <button title={contacts?.accounts?.[a.id]?.granted ? `Contacts imported ${contacts.accounts[a.id].importedAt ? new Date(contacts.accounts[a.id].importedAt).toLocaleString('en-GB') : 'never'} — refreshes daily` : 'Import your Google address book for To/Cc suggestions (asks Google for read-only contacts access)'} onClick={() => importContacts(a)} disabled={importing === a.id}>{importing === a.id ? 'Importing…' : contacts?.accounts?.[a.id]?.granted ? 'Refresh contacts' : 'Import Google Contacts'}</button>}
                 {a.kind !== 'imap' && !a.canDeleteForever && <button title="Re-sign-in granting full Gmail access so Tomail can empty Trash / delete permanently" onClick={() => addGoogle(true)} disabled={busy}>Grant full access</button>}
                 <button onClick={async () => { if (confirm(`Re-download the whole mailbox for ${a.email}? Cached bodies are dropped.`)) { await window.mail.accounts.resync(a.id); refreshAccounts(); } }}>Resync</button>
                 <button onClick={async () => { if (confirm(`Remove ${a.email} from this PC? (Nothing is deleted on the server.)`)) { await window.mail.accounts.remove(a.id); refreshAccounts(); } }}>Remove</button>
@@ -115,6 +121,7 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
               <button onClick={() => setShowImap(v => !v)}>{showImap ? 'Cancel' : 'Add other account (IMAP)'}</button>
             </div>
             {showImap && <ImapForm toast={toast} onDone={() => { setShowImap(false); refreshAccounts(); }} />}
+            {contacts && <p className="muted">Address book: {contacts.total.toLocaleString()} people ({contacts.google.toLocaleString()} from Google Contacts, the rest learned from your mail). Importing needs the <b>People API</b> enabled in the same Google Cloud project as the Gmail API.</p>}
             <p className="muted">Google accounts sign in through your browser; Tomail never sees the password. Other providers (Outlook, Yahoo, iCloud, Fastmail, your own domain…) connect over IMAP/SMTP, usually with an app password. "All Inboxes" merges every account.</p>
           </>}
           {tab === 'rules' && <RulesTab accounts={accounts} labels={labels} toast={toast} seed={ruleSeed} />}
