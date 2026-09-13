@@ -31,7 +31,7 @@ const api = {
   contacts: { search: (q) => call('contacts:search', q) },
   drafts: { list: () => call('drafts:list'), get: (id) => call('drafts:get', id), save: (d) => call('drafts:save', d), remove: (id) => call('drafts:remove', id), openRemote: (accountId, messageId) => call('drafts:openRemote', accountId, messageId) },
   attachments: { save: (a, m, att) => call('attachments:save', a, m, att), open: (a, m, att) => call('attachments:open', a, m, att) },
-  compose: { pickFiles: () => call('compose:pickFiles') },
+  compose: { pickFiles: () => call('compose:pickFiles'), open: (payload) => call('compose:open', payload), payload: (id) => call('compose:payload', id), closeNow: (id) => call('compose:closeNow', id) },
   sync: { now: (accountId) => call('sync:now', accountId), status: () => call('sync:status') },
   shell: { openExternal: (url) => call('shell:openExternal', url) },
   app: { info: () => call('app:info'), installUpdate: () => call('app:installUpdate'), setBadge: (count, dataUrl) => call('app:setBadge', count, dataUrl) },

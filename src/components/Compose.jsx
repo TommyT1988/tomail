@@ -6,7 +6,7 @@ import Icon from './Icons.jsx';
 import AddressInput from './AddressInput.jsx';
 
 /** draft: { mode:'new'|'reply'|'replyAll'|'forward', accountId, original?, draftId?, to?, subject? } */
-export default function Compose({ draft, accounts, prefs, onClose, toast }) {
+export default function Compose({ draft, accounts, prefs, onClose, toast, standalone = false }) {
   const orig = draft.original;
   const me = new Set(accounts.map(a => a.email.toLowerCase()));
   const initAcct = accounts.find(a => a.id === draft.accountId) || accounts[0];
@@ -56,6 +56,9 @@ export default function Compose({ draft, accounts, prefs, onClose, toast }) {
   const scheduleSave = () => { clearTimeout(saveTimer.current); saveTimer.current = setTimeout(save, 2500); };
   useEffect(() => () => clearTimeout(saveTimer.current), []);
   useEffect(() => { const k = (e) => { if (e.key === 'Escape' && !sending) close(); }; document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k); }); // eslint-disable-line
+  // OS window close button → save the draft, then let the window go
+  useEffect(() => { if (!standalone) return; return window.mail.on('compose:request-close', () => close()); }); // eslint-disable-line
+  useEffect(() => { if (standalone) document.title = (f.subject?.trim() || ({ new: 'New message', reply: 'Reply', replyAll: 'Reply all', forward: 'Forward' })[draft.mode]) + ' — Tomail'; }, [f.subject, standalone, draft.mode]);
 
   const close = async () => { clearTimeout(saveTimer.current); if (dirty.current && !isEmpty()) await save(); else if (latest.current.draftId && isEmpty()) await window.mail.drafts.remove(latest.current.draftId).catch(() => {}); onClose(); };
   const discard = async () => { clearTimeout(saveTimer.current); if (latest.current.draftId) await window.mail.drafts.remove(latest.current.draftId).catch(() => {}); onClose(); };
@@ -73,10 +76,10 @@ export default function Compose({ draft, accounts, prefs, onClose, toast }) {
   const pick = async () => { const files = await window.mail.compose.pickFiles(); if (files.length) { setF(x => ({ ...x, attachments: [...x.attachments, ...files] })); dirty.current = true; scheduleSave(); } };
   const acct = accounts.find(a => a.id === accountId);
   if (!loaded) return null;
+  const Wrap = standalone ? ({ children }) => <div className="compose standalone">{children}</div> : ({ children }) => <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget && !sending) close(); }}><div className="modal compose" style={{ width: 860 }}>{children}</div></div>;
   return (
-    <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget && !sending) close(); }}>
-      <div className="modal compose" style={{ width: 860 }}>
-        <div className="mh">{({ new: 'New message', reply: 'Reply', replyAll: 'Reply all', forward: 'Forward' })[draft.mode]}<span className="draftstate">{saveState}</span><button className="x" onClick={close} disabled={sending}>✕</button></div>
+    <Wrap>
+        <div className="mh">{({ new: 'New message', reply: 'Reply', replyAll: 'Reply all', forward: 'Forward' })[draft.mode]}<span className="draftstate">{saveState}</span>{!standalone && <button className="x" onClick={close} disabled={sending}>✕</button>}</div>
         <div className="mb">
           <div className="field"><label>From</label>
             {accounts.length > 1 ? <select value={accountId} onChange={e => { const id = Number(e.target.value); const old = sigHtml(acct), nu = sigHtml(accounts.find(a => a.id === id)); setAccountId(id); setF(x => ({ ...x, html: old && x.html.endsWith(old) ? x.html.slice(0, -old.length) + nu : x.html })); dirty.current = true; scheduleSave(); }}>{accounts.map(a => <option key={a.id} value={a.id}>{a.display_name && a.display_name !== a.email ? `${a.display_name} <${a.email}>` : a.email}</option>)}</select>
@@ -102,8 +105,7 @@ export default function Compose({ draft, accounts, prefs, onClose, toast }) {
           <span className="spacer" />
           <button onClick={discard} disabled={sending}>Discard</button>
         </div>
-      </div>
-    </div>
+    </Wrap>
   );
 }
 

@@ -36,6 +36,8 @@ app.setPath('userData', path.join(app.getPath('appData'), DEMO ? 'tomail-demo' :
 if (process.platform === 'win32') app.setAppUserModelId('app.tomail.desktop');
 
 let win, db, settings, accounts, actions;
+const composeWins = new Map();   // id → { win, payload }
+let composeSeq = 0;
 const syncStatus = {};
 let lastCheckedAt = null;
 let syncTimer, snoozeTimer, changeTimer;
@@ -43,7 +45,7 @@ const syncing = new Set();
 const lastSyncAt = new Map();   // accountId → ms
 const pushTimers = new Map();
 
-function send(channel, payload) { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); }
+function send(channel, payload) { for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload); }
 function notifyChanged() { clearTimeout(changeTimer); changeTimer = setTimeout(() => send('mail:changed', {}), 300); }
 function broadcastStatus() { send('sync:status', { accounts: syncStatus, lastCheckedAt }); }
 
@@ -131,8 +133,8 @@ function createWindow() {
         await js(`(() => { const r = document.querySelectorAll('.row')[5]; if (r) r.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); })()`);
         await wait(1200); await shot('2-reading.png');
         await js(`(() => { const b = [...document.querySelectorAll('.toolbar button')].find(b => b.textContent.includes('Reply') && !b.textContent.includes('All')); b && b.click(); })()`);
-        await wait(800); await shot('3-compose.png');
-        await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); })()`);
+        await wait(1800);
+        { const cw = [...composeWins.values()][0]?.win; if (cw && !cw.isDestroyed()) { fs.writeFileSync(path.join(dir, '3-compose.png'), (await cw.webContents.capturePage()).toPNG()); const rec = [...composeWins.values()][0]; rec.allowClose = true; cw.close(); } }
         await wait(300);
         await js(`(() => { const r = [...document.querySelectorAll('.row')].find(r => r.textContent.includes('Invitation')); if (r) r.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); })()`);
         await wait(1000); await shot('4-invite.png');
@@ -154,6 +156,35 @@ function createWindow() {
   }
 }
 
+/** A compose window: independent (not a child), so it can be moved/minimised/resized on its own. */
+function openComposeWindow(payload) {
+  const id = ++composeSeq;
+  const prefs = settings.get().prefs;
+  const b = prefs.composeBounds || {};
+  const cw = new BrowserWindow({
+    width: b.width || 900, height: b.height || 720, x: b.x, y: b.y, minWidth: 620, minHeight: 460, title: 'New message', autoHideMenuBar: true, show: false,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1f22' : '#f6f6f6',
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true },
+  });
+  composeWins.set(id, { win: cw, payload });
+  cw.once('ready-to-show', () => cw.show());
+  cw.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:|^mailto:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  cw.webContents.on('context-menu', (_e, params) => {
+    if (!params.isEditable) return;
+    const items = params.dictionarySuggestions.map(s => ({ label: s, click: () => cw.webContents.replaceMisspelling(s) }));
+    if (params.misspelledWord) items.push({ label: 'Add to dictionary', click: () => cw.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) }, { type: 'separator' });
+    items.push({ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' });
+    Menu.buildFromTemplate(items).popup();
+  });
+  // Closing via the OS button: let the renderer save the draft first, then it calls compose:closeNow.
+  cw.on('close', (e) => { const rec = composeWins.get(id); if (rec && !rec.allowClose) { e.preventDefault(); rec.allowClose = true; cw.webContents.send('compose:request-close'); setTimeout(() => { if (!cw.isDestroyed()) cw.close(); }, 4000); } });
+  cw.on('closed', () => { composeWins.delete(id); });
+  const remember = () => { if (cw.isDestroyed() || cw.isMinimized() || cw.isMaximized()) return; settings.set({ prefs: { composeBounds: cw.getBounds() } }); };
+  cw.on('resize', remember); cw.on('move', remember);
+  const dev = process.env.VITE_DEV_SERVER_URL;
+  cw.loadURL((dev || 'app://tomail/index.html') + '#compose/' + id);
+  return id;
+}
 function handle(channel, fn) {
   ipcMain.handle(channel, async (_e, ...args) => {
     try { return await fn(...args); }
@@ -245,8 +276,11 @@ function registerIpc() {
     if (err) throw new Error(err);
     return file;
   });
-  handle('compose:pickFiles', async () => {
-    const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'] });
+  handle('compose:open', (payload) => openComposeWindow(payload));
+  handle('compose:payload', (id) => composeWins.get(Number(id))?.payload || null);
+  handle('compose:closeNow', (id) => { const rec = composeWins.get(Number(id)); if (rec) { rec.allowClose = true; if (!rec.win.isDestroyed()) rec.win.close(); } return true; });
+  handle('compose:pickFiles', async (_id) => {
+    const r = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow() || win, { properties: ['openFile', 'multiSelections'] });
     return r.canceled ? [] : r.filePaths.map(p => ({ path: p, filename: path.basename(p), size: fs.statSync(p).size }));
   });
   handle('sync:now', (accountId) => { syncAll(accountId || null).catch(() => {}); return true; });

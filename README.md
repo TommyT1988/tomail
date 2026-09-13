@@ -11,6 +11,7 @@ instant even for a 60,000-message inbox — and it still works when you're offli
 - Google accounts (sign in with your browser) and IMAP/SMTP accounts (server settings looked up automatically), any mix, with a merged **All Inboxes** view
 - **Conversation view** (toggle in the list header): one row per thread, messages stacked in the reading pane
 - **Drafts** auto-save as you type and are mirrored to the server's Drafts folder, so you can finish them elsewhere
+- **Compose opens in its own window** (move, minimise, resize; several at once); closing it saves the draft
 - **Rich-text compose**: bold/italic/underline, lists, quotes, links, pasted or inserted images; per-account signatures
 - **Calendar invites** show as a card with Accept / Maybe / Decline (sends the reply to the organiser)
 - **Notifications** for new inbox mail (click to open) and an unread badge on the dock / taskbar icon

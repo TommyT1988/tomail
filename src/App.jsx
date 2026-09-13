@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Sidebar from './components/Sidebar.jsx';
 import MessageList from './components/MessageList.jsx';
 import ReadingPane from './components/ReadingPane.jsx';
-import Compose from './components/Compose.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import { Dropdown, MI, MarkMenu, QuickActionsMenu, SnoozeMenu, FilterMenu } from './components/Menus.jsx';
 import { ago, gmailQuery, keyOf, sameView } from './util.js';
@@ -40,7 +39,6 @@ export default function App() {
   const [msgLoading, setMsgLoading] = useState(false);
   const [msgError, setMsgError] = useState(null);
   const [search, setSearch] = useState('');
-  const [compose, setCompose] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ruleSeed, setRuleSeed] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -140,8 +138,8 @@ export default function App() {
   const curIndex = () => { const s = selected[selected.length - 1]; return s ? itemsRef.current.findIndex(i => i.id === s.id && i.accountId === s.accountId) : -1; };
   const openItem = async (m) => {
     if (!m?.isDraft) return;
-    if (m.remoteDraft) { try { const d = await mail.drafts.openRemote(m.accountId, m.id); setCompose({ mode: 'new', accountId: m.accountId, draftId: d.id }); } catch (e) { toast(e.message, true); } }
-    else setCompose({ mode: 'new', accountId: m.accountId, draftId: m.draftId });
+    if (m.remoteDraft) { try { const d = await mail.drafts.openRemote(m.accountId, m.id); mail.compose.open({ mode: 'new', accountId: m.accountId, draftId: d.id }); } catch (e) { toast(e.message, true); } }
+    else mail.compose.open({ mode: 'new', accountId: m.accountId, draftId: m.draftId });
   };
 
   // ── actions ──
@@ -172,9 +170,9 @@ export default function App() {
   const doSnooze = (until) => act((t) => mail.actions.snooze(t, until), `Snoozed until ${new Date(until).toLocaleString('en-GB')}`);
   const doMove = (labelId) => act((t) => mail.actions.move(t, labelId, view.kind === 'label' ? view.labelId : (view.kind === 'all-inboxes' ? 'INBOX' : null)), 'Moved %n');
   const openCompose = (mode, m = message) => {
-    if (mode === 'new') { setCompose({ mode, accountId: view.accountId || selAccount?.id || accounts[0]?.id }); return; }
+    if (mode === 'new') { mail.compose.open({ mode, accountId: view.accountId || selAccount?.id || accounts[0]?.id }).catch(e => toast(e.message, true)); return; }
     if (!m || !m.bodyFetched) { toast('Open a message first', true); return; }
-    setCompose({ mode, accountId: m.accountId, original: m });
+    mail.compose.open({ mode, accountId: m.accountId, originalId: m.id }).catch(e => toast(e.message, true));
   };
   const runSearch = (deep) => {
     const q = search.trim();
@@ -185,7 +183,7 @@ export default function App() {
     mail.messages.deepSearch(gmailQuery(q, filters), filters?.accountId || null).then(ids => setView({ kind: 'ids', ids, q })).catch(e => toast(e.message, true)).finally(() => setLoading(false));
   };
   const onKey = (e) => {
-    if (compose || settingsOpen) return;
+    if (settingsOpen) return;
     const i = curIndex(); const k = e.key; const cur = itemsRef.current[i];
     if (k === 'ArrowDown') { e.preventDefault(); selectIndex(Math.min(itemsRef.current.length - 1, i + 1)); }
     else if (k === 'ArrowUp') { e.preventDefault(); selectIndex(Math.max(0, i - 1)); }
@@ -233,7 +231,7 @@ export default function App() {
       </div>
       <div className="toolbar">
         {accounts.length > 1
-          ? <Dropdown className="newdd" btnClass="new-btn" label={<><Icon name="plus" /> New</>}>{accounts.map(a => <MI key={a.id} onClick={() => setCompose({ mode: 'new', accountId: a.id })}><Icon name="mail" /> from {a.email}</MI>)}</Dropdown>
+          ? <Dropdown className="newdd" btnClass="new-btn" label={<><Icon name="plus" /> New</>}>{accounts.map(a => <MI key={a.id} onClick={() => mail.compose.open({ mode: 'new', accountId: a.id })}><Icon name="mail" /> from {a.email}</MI>)}</Dropdown>
           : <button className="new-btn" onClick={() => openCompose('new')} disabled={!accounts.length}><Icon name="plus" /> New</button>}
         <button onClick={() => { mail.sync.now(); toast('Checking for new mail…'); }} disabled={!accounts.length || info?.demo}><span className="ico"><Icon name="refresh" /></span>Refresh</button>
         <span className="spacer" />
@@ -296,7 +294,6 @@ export default function App() {
         <button onClick={() => setSettingsOpen(true)}><Icon name="settings" size={12} /> Settings</button>
         <button onClick={() => { mail.sync.now(); }} disabled={!accounts.length || info?.demo}><Icon name="refresh" size={12} /> Sync now</button>
       </div>
-      {compose && <Compose key={compose.draftId || compose.original?.id || 'new'} draft={compose} accounts={accounts} prefs={prefs} onClose={() => { setCompose(null); loadMeta(); if (viewRef.current.kind === 'drafts') loadList(viewRef.current); }} toast={toast} />}
       {settingsOpen && <SettingsModal onClose={() => { setSettingsOpen(false); setRuleSeed(null); }} accounts={accounts} labels={labels} ruleSeed={ruleSeed} refreshAccounts={loadMeta} toast={toast} info={info} initialTab={typeof settingsOpen === 'string' ? settingsOpen : undefined} />}
       {toastMsg && <div className={'toast' + (toastMsg.err ? ' err' : '')}>{toastMsg.m}</div>}
     </div>
