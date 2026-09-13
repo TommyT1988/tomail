@@ -2,7 +2,7 @@
   "name": "tomail",
   "productName": "Tomail",
   "version": "0.2.0",
-  "description": "Tomail — a fast desktop email client for Gmail and Google Workspace",
+  "description": "Tomail \u2014 a fast desktop email client for Gmail and Google Workspace",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -74,7 +74,8 @@
       {
         "provider": "github",
         "owner": "TommyT1988",
-        "repo": "tomail"
+        "repo": "tomail",
+        "releaseType": "release"
       }
     ]
   },
