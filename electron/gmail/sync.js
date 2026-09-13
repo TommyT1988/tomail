@@ -5,9 +5,9 @@ const { parseAddresses, headersToObj } = require('./mime');
 const { sleep, GmailError } = require('./api');
 
 const META_HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'References', 'Reply-To', 'Content-Type'];
-const BATCH = 50;          // Gmail recommends ≤50 per batch to stay under per-user rate limits
+const BATCH = 40;          // 40 × 5 units = 200 units per batch; the client's budget paces to ~1 batch/s
 const PAGE = 500;          // messages.list max
-const PAUSE_MS = 250;      // between batches during initial sync
+const PAUSE_MS = 50;       // budget does the real pacing
 
 /** Gmail message resource (format=metadata|full) → normalised row for db.upsertMessages */
 function normaliseMessage(m) {
@@ -56,9 +56,10 @@ class AccountSync {
       this.db.updateAccount(this.accountId, { last_sync_at: Date.now(), last_error: null });
       this.onProgress({ phase: 'idle' });
     } catch (e) {
+      const friendly = /Quota exceeded|rateLimit/i.test(e.message) ? 'Gmail rate limit reached — pausing, will resume automatically' : e.message;
       this.log(`sync error (${this.accountId}): ${e.message}`);
-      this.db.updateAccount(this.accountId, { last_error: e.message });
-      this.onProgress({ phase: 'error', error: e.message, code: e.code });
+      this.db.updateAccount(this.accountId, { last_error: friendly });
+      this.onProgress({ phase: 'error', error: friendly, code: e.code });
       throw e;
     } finally { this.running = false; }
   }
