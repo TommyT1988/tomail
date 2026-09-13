@@ -132,6 +132,16 @@ CREATE TABLE IF NOT EXISTS contacts (
   recv_count INTEGER NOT NULL DEFAULT 0,
   last_used INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS outbox (
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  subject TEXT, to_text TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  next_try INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS rules (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -261,6 +271,42 @@ class MailDb {
     return this.listRules().find(x => x.id === Number(res.lastInsertRowid));
   }
   deleteRule(id) { this.prep('DELETE FROM rules WHERE id = ?').run(id); }
+  // ── outbox (messages waiting for a connection) ──
+  enqueueOutbox(accountId, payload, err) {
+    const r = this.prep('INSERT INTO outbox (account_id, payload_json, subject, to_text, attempts, last_error, next_try, created_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(accountId, JSON.stringify(payload), payload.subject || '', payload.to || '', 1, err || null, Date.now() + 60000, Date.now());
+    return Number(r.lastInsertRowid);
+  }
+  listOutbox() { return this.prep('SELECT id, account_id, subject, to_text, attempts, last_error, next_try, created_at FROM outbox ORDER BY created_at').all().map(r => ({ id: r.id, accountId: r.account_id, subject: r.subject, to: r.to_text, attempts: r.attempts, lastError: r.last_error, nextTry: r.next_try, createdAt: r.created_at })); }
+  dueOutbox(now) { return this.prep('SELECT * FROM outbox WHERE next_try <= ? ORDER BY created_at').all(now).map(r => ({ ...r, payload: JSON.parse(r.payload_json) })); }
+  getOutbox(id) { const r = this.prep('SELECT * FROM outbox WHERE id = ?').get(id); return r ? { ...r, payload: JSON.parse(r.payload_json) } : null; }
+  outboxFailed(id, err) { this.prep('UPDATE outbox SET attempts = attempts + 1, last_error = ?, next_try = ? WHERE id = ?').run(err, Date.now() + Math.min(30, 2 ** 1) * 60000, id); }
+  removeOutbox(id) { this.prep('DELETE FROM outbox WHERE id = ?').run(id); }
+  // ── labels ──
+  updateLabel(accountId, id, fields) {
+    const keys = Object.keys(fields); if (!keys.length) return;
+    this.prep(`UPDATE labels SET ${keys.map(k => `${k} = ?`).join(', ')} WHERE account_id = ? AND id = ?`).run(...keys.map(k => fields[k]), accountId, id);
+  }
+  deleteLabel(accountId, id) {
+    this.tx(() => {
+      this.prep('DELETE FROM labels WHERE account_id = ? AND id = ?').run(accountId, id);
+      const ids = this.labelIds(accountId, id);
+      if (ids.length) this.applyLabelChange(accountId, ids, { remove: [id] });
+    });
+  }
+  // ── housekeeping ──
+  /** Drop cached bodies older than N days (kept for flagged/snoozed/unfetched). Returns rows cleared. */
+  pruneBodies(days) {
+    if (!days) return 0;
+    const cutoff = Date.now() - days * 86400000;
+    return Number(this.prep(`UPDATE messages SET body_fetched = 0, body_text = NULL, body_html = NULL, attachments_json = NULL
+      WHERE body_fetched = 1 AND internal_date < ? AND starred = 0 AND snooze_until IS NULL`).run(cutoff).changes);
+  }
+  vacuum() { this.db.exec('VACUUM'); this.kvSet('lastVacuum', Date.now()); }
+  stats() {
+    const n = this.prep('SELECT count(*) AS n, sum(body_fetched) AS b FROM messages').get();
+    return { messages: n.n, bodies: n.b || 0, lastVacuum: this.kvGet('lastVacuum') };
+  }
   /** Adopt a snooze wake time learned from the server (another device snoozed it) without clobbering a local one. */
   adoptSnooze(accountId, id, until) { this.prep('UPDATE messages SET snooze_until = ? WHERE account_id = ? AND id = ? AND snooze_until IS NULL').run(until, accountId, id); }
 

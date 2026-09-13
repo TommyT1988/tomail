@@ -2,18 +2,18 @@ import React, { useState } from 'react';
 import { SYSTEM_FOLDERS, labelTree } from '../util.js';
 import Icon from './Icons.jsx';
 
-function Item({ active, onClick, icon, name, count, unread, indent = 0, tw, cls = '' }) {
+function Item({ active, onClick, onContextMenu, icon, name, count, unread, indent = 0, tw, cls = '', color }) {
   return (
-    <div className={`item indent${indent} ${active ? 'active' : ''} ${cls}`} onClick={onClick}>
+    <div className={`item indent${indent} ${active ? 'active' : ''} ${cls}`} onClick={onClick} onContextMenu={onContextMenu}>
       {tw !== undefined ? <span className="tw">{tw}</span> : null}
-      {icon !== undefined && <span className="ico"><Icon name={icon} size={13} /></span>}
+      {icon !== undefined && <span className="ico" style={color ? { color } : undefined}><Icon name={icon} size={13} fill={!!color} /></span>}
       <span className="name" title={name}>{name}</span>
       {count > 0 && <span className={'cnt' + (unread ? ' unread' : '')}>{count.toLocaleString()}</span>}
     </div>
   );
 }
 
-export default function Sidebar({ accounts, labels, counts, view, setView, status, draftCounts, onReorder }) {
+export default function Sidebar({ accounts, labels, counts, view, setView, status, draftCounts, onReorder, onLabelMenu, outboxCount }) {
   const [collapsed, setCollapsed] = useState({});
   const [dragId, setDragId] = useState(null);
   const [overId, setOverId] = useState(null);
@@ -31,8 +31,8 @@ export default function Sidebar({ accounts, labels, counts, view, setView, statu
     const c = l ? lc(aid, l.id) : { total: 0, unread: 0 };
     return (
       <React.Fragment key={key}>
-        <Item indent={Math.min(3, depth)} tw={n.children.length ? (open ? '▾' : '▸') : ''} icon="folder" name={n.name}
-          count={c.unread} unread active={l && isView({ kind: 'label', accountId: aid, labelId: l.id })}
+        <Item indent={Math.min(3, depth)} tw={n.children.length ? (open ? '▾' : '▸') : ''} icon="folder" name={n.name} color={l?.color_bg || undefined}
+          count={c.unread} unread active={l && isView({ kind: 'label', accountId: aid, labelId: l.id })} onContextMenu={(e) => { if (l) { e.preventDefault(); onLabelMenu?.(e, aid, l); } }}
           onClick={(e) => { if (e.target.classList.contains('tw') && n.children.length) { toggle(key); return; } if (l) setView({ kind: 'label', accountId: aid, labelId: l.id }); else toggle(key); }} />
         {open && n.children.length > 0 && renderTree(n.children, aid, depth + 1)}
       </React.Fragment>
@@ -50,6 +50,7 @@ export default function Sidebar({ accounts, labels, counts, view, setView, statu
           <Item indent={1} icon="flag" name="Flagged" count={fav.starred} active={isView({ kind: 'starred' })} onClick={() => setView({ kind: 'starred' })} />
           <Item indent={1} icon="clock" name="Snoozed" count={fav.snoozed} active={isView({ kind: 'snoozed' })} onClick={() => setView({ kind: 'snoozed' })} />
           <Item indent={1} icon="edit" name="Drafts" count={draftCounts?.all || 0} active={isView({ kind: 'drafts' })} onClick={() => setView({ kind: 'drafts' })} />
+          {outboxCount > 0 && <Item indent={1} icon="send" name="Outbox" count={outboxCount} unread active={isView({ kind: 'outbox' })} onClick={() => setView({ kind: 'outbox' })} />}
         </>}
         {accounts.map(a => {
           const st = status?.accounts?.[a.id];

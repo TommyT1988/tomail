@@ -18,13 +18,14 @@ class Actions {
     return g;
   }
 
+  /** Returns { ids } — the targets after the change (IMAP moves re-key messages), so callers can undo. */
   async modify(targets, { add = [], remove = [] }) {
-    const failed = [];
+    const failed = []; const result = [];
     for (const [accountId, ids] of this.groupByAccount(targets)) {
       const before = ids.map(id => ({ id, labels: this.db.getMessage(accountId, id)?.labels || [] }));
       this.db.applyLabelChange(accountId, ids, { add, remove });
       this.onChange();
-      try { await this.providers(accountId).modify(ids, { add, remove }); }
+      try { const r = await this.providers(accountId).modify(ids, { add, remove }); const rk = r?.rekeyed; for (const id of ids) result.push({ accountId, id: rk?.get(id) || id }); }
       catch (e) {
         for (const b of before) {
           const cur = this.db.getMessage(accountId, b.id);
@@ -35,6 +36,7 @@ class Actions {
       this.onChange();
     }
     if (failed.length) throw new Error(failed.join('; '));
+    return { ids: result };
   }
   markRead(t, read = true) { return this.modify(t, read ? { remove: ['UNREAD'] } : { add: ['UNREAD'] }); }
   star(t, on = true) { return this.modify(t, on ? { add: ['STARRED'] } : { remove: ['STARRED'] }); }
@@ -163,7 +165,35 @@ class Actions {
     const raw = await buildRaw({ from: this.fromHeader(acct), to: opts.to, cc: opts.cc, bcc: opts.bcc, subject: opts.subject, text, html, attachments, inReplyTo, references, icalEvent: opts.icalEvent });
     return { raw, threadId };
   }
-  async send(opts) {
+  isNetworkError(e) { return /fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|socket hang up|network|Connection not available|timed out/i.test(e?.message || '') || /^(ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN)/.test(e?.code || ''); }
+  /** Send now; on a connection failure the message goes to the Outbox and is retried automatically. */
+  async send(opts, { fromOutbox = false } = {}) {
+    try { return await this.sendNow(opts); }
+    catch (e) {
+      if (!fromOutbox && this.isNetworkError(e)) {
+        const id = this.db.enqueueOutbox(opts.accountId, opts, e.message);
+        if (opts.draftId) await this.deleteDraft(opts.draftId).catch(() => {});
+        this.onChange();
+        const err = new Error('No connection — saved to Outbox, will send automatically'); err.code = 'OUTBOX'; err.outboxId = id; throw err;
+      }
+      throw e;
+    }
+  }
+  async processOutbox() {
+    const due = this.db.dueOutbox(Date.now());
+    let sent = 0;
+    for (const item of due) {
+      try { await this.sendNow({ ...item.payload, draftId: undefined }); this.db.removeOutbox(item.id); sent++; }
+      catch (e) { this.db.outboxFailed(item.id, e.message); this.log('outbox send failed: ' + e.message); if (!this.isNetworkError(e)) this.db.prep('UPDATE outbox SET next_try = ? WHERE id = ?').run(Date.now() + 3600000, item.id); }
+    }
+    if (due.length) this.onChange();
+    return sent;
+  }
+  async sendOutboxItem(id) {
+    const item = this.db.getOutbox(id); if (!item) throw new Error('Not in outbox');
+    await this.sendNow({ ...item.payload, draftId: undefined }); this.db.removeOutbox(id); this.onChange();
+  }
+  async sendNow(opts) {
     const acct = this.db.getAccount(opts.accountId);
     if (!acct) throw new Error('Unknown account');
     const { raw, threadId } = await this.buildOutgoing(opts, acct);
@@ -177,6 +207,10 @@ class Actions {
     this.onChange();
     return sent;
   }
+
+  async renameLabel(accountId, id, name) { await this.providers(accountId).renameLabel(id, name); this.onChange(); }
+  async deleteLabel(accountId, id) { await this.providers(accountId).deleteLabel(id); this.onChange(); }
+  async setLabelColor(accountId, id, bg, fg) { await this.providers(accountId).setLabelColor(id, bg, fg); this.onChange(); }
 
   // ── drafts (local first; mirrored to the provider's Drafts best-effort) ──
   listDrafts() { return this.db.listDrafts(); }

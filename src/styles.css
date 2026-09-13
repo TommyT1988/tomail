@@ -264,3 +264,20 @@ a { color: var(--accent); }
 :root.dark .compose.standalone .mf { background: var(--panel); }
 .compose.standalone .mf .spacer { flex: 1; }
 .compose.standalone .quote { max-height: 200px; }
+
+/* ── previews, undo toast, send banner, shortcuts, label menu ── */
+.thumbs { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.thumbs .thumb { max-height: 140px; max-width: 220px; border: 1px solid var(--border); border-radius: 4px; cursor: zoom-in; background: #fff; }
+.thumbs .thumb.ph { width: 120px; height: 90px; display: inline-block; background: var(--group); }
+.thread .card .cb .thumbs { padding: 6px 12px; }
+.toast button { margin-left: 12px; background: #fff; color: #222; border-radius: 4px; padding: 2px 10px; font-weight: 600; }
+.toast.err button { color: var(--danger); }
+.sendbar { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); background: #2f6fcb; color: #fff; padding: 8px 16px; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.3); z-index: 200; display: flex; gap: 12px; align-items: center; }
+.sendbar button { background: #fff; color: #2f6fcb; font-weight: 600; padding: 2px 10px; }
+.sendbar .bar { width: 120px; height: 4px; background: rgba(255,255,255,.3); border-radius: 2px; overflow: hidden; } .sendbar .bar i { display: block; height: 100%; background: #fff; transition: width .5s linear; }
+.ctx { position: fixed; z-index: 300; }
+.shortcuts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; }
+.shortcuts div { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.shortcuts kbd { background: var(--group); border: 1px solid var(--border); border-radius: 3px; padding: 0 6px; font-family: inherit; font-size: 12px; }
+.outbox .row .from { color: var(--accent); }
+.swatches { display: flex; gap: 4px; flex-wrap: wrap; padding: 6px 12px; } .swatches span { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; } .swatches span:hover { border-color: var(--text); }

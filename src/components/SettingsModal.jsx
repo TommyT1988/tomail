@@ -50,6 +50,9 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
   const [busy, setBusy] = useState(false);
   const [showImap, setShowImap] = useState(false);
   const [sigEdit, setSigEdit] = useState(null);
+  const [dbInfo, setDbInfo] = useState(null);
+  const [problem, setProblem] = useState('');
+  useEffect(() => { window.mail.app.dbInfo().then(setDbInfo).catch(() => {}); }, []);
   useEffect(() => { window.mail.settings.get().then(setS); }, []);
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose(); }; document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k); }, [onClose]);
   if (!s) return null;
@@ -79,9 +82,14 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
             <div className="frow"><label>Conversation view</label><label><input type="checkbox" checked={!!s.prefs.threaded} onChange={e => pref('threaded', e.target.checked)} /> group messages by conversation by default</label></div>
             <div className="frow"><label>Mark as read after</label><div><input type="number" min="0" style={{ width: 80 }} value={s.prefs.markReadDelayMs} onChange={e => pref('markReadDelayMs', Number(e.target.value))} /> ms in the reading pane (0 = immediately)</div></div>
             <div className="frow"><label>Remote images</label><label><input type="checkbox" checked={!!s.prefs.loadRemoteImages} onChange={e => pref('loadRemoteImages', e.target.checked)} /> always load images in messages (tracking pixels will fire)</label></div>
+            <div className="frow"><label>Undo send</label><div><input type="number" min="0" max="30" style={{ width: 70 }} value={s.prefs.sendDelaySec ?? 5} onChange={e => pref('sendDelaySec', Number(e.target.value))} /> seconds to cancel after pressing Send (0 = send immediately)</div></div>
+            <div className="frow"><label>Keep downloaded bodies</label><div><select value={s.prefs.bodyRetentionDays || 0} onChange={e => pref('bodyRetentionDays', Number(e.target.value))}><option value={0}>forever</option><option value={30}>30 days</option><option value={90}>90 days</option><option value={365}>1 year</option></select> <small>(headers stay; older bodies re-download when opened)</small></div></div>
             <div className="frow"><label>Default signature</label><textarea rows={3} value={s.prefs.signature} onChange={e => pref('signature', e.target.value)} placeholder="Used by accounts without their own signature" /></div>
             <div className="frow"><label></label><button className="primary" onClick={() => save({ prefs: s.prefs })}>Save</button></div>
+            <div className="frow"><label>Local database</label><div><small>{dbInfo ? `${(dbInfo.size / 1048576).toFixed(0)} MB · ${dbInfo.messages.toLocaleString()} messages, ${dbInfo.bodies.toLocaleString()} bodies cached · compacted ${dbInfo.lastVacuum ? new Date(dbInfo.lastVacuum).toLocaleDateString('en-GB') : 'never'}` : '…'}</small> <button onClick={async () => { await window.mail.settings.set({ prefs: s.prefs }); const r = await window.mail.app.compactDb(); toast(`Compacted${r.pruned ? `, cleared ${r.pruned} old bodies` : ''}`); window.mail.app.dbInfo().then(setDbInfo); }}>Compact now</button></div></div>
             <div className="frow"><label>Data folder</label><small style={{ gridColumn: 2 }}>{info?.userData} · secrets {info?.encrypted ? 'encrypted with the OS keychain' : 'stored unencrypted (no keychain available)'} · v{info?.version}</small></div>
+            <div className="frow"><label>Something wrong?</label><div><textarea rows={2} style={{ width: '100%' }} placeholder="What happened? (a GitHub issue opens in your browser with the app version and recent log attached, email addresses redacted)" value={problem} onChange={e => setProblem(e.target.value)} />
+              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}><button className="primary" onClick={() => window.mail.app.reportProblem(problem)}><Icon name="external" size={12} /> Report a problem</button><button onClick={() => window.mail.app.openLogs()}>Open log folder</button></div></div></div>
           </>}
           {tab === 'accounts' && <>
             {accounts.map((a, i) => (

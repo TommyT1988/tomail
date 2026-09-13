@@ -4,7 +4,7 @@ const path = require('node:path');
 
 const DEFAULTS = {
   oauth: { clientId: '', clientSecret: '' },
-  prefs: { syncIntervalSec: 60, fastPollSec: 20, loadRemoteImages: false, signature: '', markReadDelayMs: 1500 },
+  prefs: { syncIntervalSec: 60, fastPollSec: 20, loadRemoteImages: false, signature: '', markReadDelayMs: 1500, sendDelaySec: 5, bodyRetentionDays: 0 },
 };
 
 class Settings {

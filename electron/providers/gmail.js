@@ -54,6 +54,13 @@ class GmailProvider {
     this.db.addLabel(this.accountId, created);
     return created;
   }
+  async renameLabel(id, name) { const l = await this.client.request('PATCH', `/labels/${id}`, { body: { name } }); this.db.updateLabel(this.accountId, id, { name: l.name }); return l; }
+  async deleteLabel(id) { await this.client.request('DELETE', `/labels/${id}`); this.db.deleteLabel(this.accountId, id); }
+  async setLabelColor(id, bg, fg) {
+    const l = await this.client.request('PATCH', `/labels/${id}`, { body: bg ? { color: { backgroundColor: bg, textColor: fg || '#ffffff' } } : { color: null } });
+    this.db.updateLabel(this.accountId, id, { color_bg: l.color?.backgroundColor || null, color_fg: l.color?.textColor || null });
+    return l;
+  }
   async saveDraft({ raw, threadId, remoteId }) {
     const body = { message: { raw, ...(threadId ? { threadId } : {}) } };
     if (remoteId) { try { const d = await this.client.request('PUT', `/drafts/${remoteId}`, { body }); return { id: d.id, messageId: d.message?.id }; } catch (e) { if (!(e instanceof GmailError && e.status === 404)) throw e; } }

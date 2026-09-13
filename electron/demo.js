@@ -75,7 +75,7 @@ function seedDemo(db) {
 
 /** A provider that accepts every write and serves no reads (bodies are pre-seeded). */
 class DemoProvider {
-  constructor() { this.kind = 'gmail'; this.canDeleteForever = true; }
+  constructor(db) { this.kind = 'gmail'; this.canDeleteForever = true; this.db = db; }
   cancel() {}
   async syncLabels() { return []; }
   async sync() { return { newInbox: [] }; }
@@ -90,6 +90,9 @@ class DemoProvider {
   async draftIdForMessage() { return null; }
   async deleteForever() {}
   async emptyFolder() { return 0; }
+  async renameLabel(id, name) { this.db?.updateLabel?.(1, id, { name }); }
+  async deleteLabel(id) { this.db?.deleteLabel?.(1, id); }
+  async setLabelColor(id, bg, fg) { this.db?.updateLabel?.(1, id, { color_bg: bg, color_fg: fg }); }
 }
 /** A client that accepts every write and serves no reads. */
 class DemoClient {

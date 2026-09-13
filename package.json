@@ -1,7 +1,7 @@
 {
   "name": "tomail",
   "productName": "Tomail",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "Tomail \u2014 a fast desktop email client for Gmail and Google Workspace",
   "private": true,
   "main": "electron/main.js",
@@ -43,8 +43,8 @@
     "files": [
       "electron/**",
       "dist/**",
-      "package.json",
-      "!electron/**/*.test.js"
+      "build/icon.png",
+      "package.json"
     ],
     "win": {
       "target": [
@@ -108,7 +108,8 @@
         "releaseType": "release"
       }
     ],
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "icon": "build/icon.png"
   },
   "license": "MIT",
   "author": "Tomas (TommyT1988)",

@@ -20,6 +20,13 @@ instant even for a 60,000-message inbox — and it still works when you're offli
 - **Rules**: file, label, archive, flag, read, junk or trash new mail by sender, recipient, subject, body or attachment (Settings → Rules, or "Create rule from sender" in Quick Actions)
 - **Address autocomplete** in To/Cc/Bcc from the people you've written to and heard from
 - **Snooze follows you**: the wake time is stored on the server (a hidden Gmail label or an IMAP keyword), so every device running Tomail wakes the message
+- **Undo** after archive, delete, move and junk, and an undo-send delay (default 5 s) after pressing Send
+- **Outbox**: with no connection, sent mail waits and goes out automatically when you're back online
+- **Open a message in its own window** (o), attachment previews for images and PDFs inline
+- **Folder management** from the sidebar's right-click menu: rename, delete, colour, new subfolder
+- **Search operators** in the search box: `from:` `to:` `in:` `is:unread` `is:flagged` `has:attachment` `after:` `before:`; press `?` for the shortcut list
+- **Report a problem** (Settings → General) opens a GitHub issue with the version and recent log attached, addresses redacted; the log file lives in the data folder
+- **Housekeeping**: optional "keep downloaded bodies for N days" and weekly database compaction
 - **Instant new mail** on IMAP accounts via IMAP IDLE; Gmail polls every 20 s while Tomail is the active window (60 s in the background). True Gmail push needs a Pub/Sub relay server, which a standalone app can't ship.
 - Instant local search (subject, sender, recipients, cached bodies) plus **Deep search** that runs Gmail's own
   search — full Gmail syntax, including inside attachments
@@ -101,7 +108,7 @@ test/                   unit tests for db, mime, batch parsing, sync and actions
 - Move follows Gmail semantics: add the target label, drop the label of the folder you were viewing.
 
 ## Roadmap
-Code signing, Microsoft OAuth for Outlook/365 IMAP, Google Contacts import, attachment previews, a proper app icon.
+Code signing, Microsoft OAuth for Outlook/365 IMAP, Google Contacts import.
 
 Microsoft 365 / Outlook.com note: Microsoft has retired password sign-in for IMAP on most accounts, so those need an app password (where the tenant allows it) or OAuth support, which Tomail doesn't have yet.
 

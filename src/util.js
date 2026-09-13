@@ -108,3 +108,26 @@ export function gmailQuery(q, f = {}) {
   if (f.after) parts.push(`after:${d(f.after)}`); if (f.before) parts.push(`before:${d(f.before)}`);
   return parts.filter(Boolean).join(' ');
 }
+
+/** "from:bob has:attachment is:unread after:2026-01-01 in:Invoices quarterly report" → { text, filters } */
+export function parseSearch(q, labels = []) {
+  const filters = {}; const rest = [];
+  const re = /(\w+):(?:"([^"]+)"|(\S+))|(\S+)/g; let m;
+  const day = (s) => { const t = Date.parse(s.replace(/\//g, '-')); return isNaN(t) ? undefined : t; };
+  while ((m = re.exec(q || ''))) {
+    if (!m[1]) { rest.push(m[4]); continue; }
+    const k = m[1].toLowerCase(), v = m[2] ?? m[3];
+    switch (k) {
+      case 'from': filters.from = v; break;
+      case 'to': filters.to = v; break;
+      case 'after': case 'since': filters.after = day(v); break;
+      case 'before': filters.before = day(v) ? day(v) + 86400000 : undefined; break;
+      case 'is': if (v === 'unread') filters.unread = true; else if (v === 'starred' || v === 'flagged') filters.starred = true; break;
+      case 'has': if (v === 'attachment') filters.hasAttachment = true; break;
+      case 'in': case 'label': { const l = labels.find(x => x.name.toLowerCase() === v.toLowerCase() || x.id.toLowerCase() === v.toLowerCase()); if (l) filters.labelId = l.id; else rest.push(m[0]); break; }
+      case 'subject': rest.push(v); break;
+      default: rest.push(m[0]);
+    }
+  }
+  return { text: rest.join(' ').trim(), filters };
+}

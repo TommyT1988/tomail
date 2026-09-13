@@ -210,6 +210,7 @@ class ImapProvider {
   /** Translate label semantics into flag + move operations. */
   async modify(ids, { add = [], remove = [] }) {
     if (!this.folders.length) await this.syncLabels();
+    const rekeyed = new Map();
     const c = await this.conn();
     const byFolder = new Map();
     for (const id of ids) { const { path, uid } = splitId(id); if (!byFolder.has(path)) byFolder.set(path, []); byFolder.get(path).push({ id, uid }); }
@@ -235,7 +236,7 @@ class ImapProvider {
             const map = r?.uidMap || new Map();
             for (const it of items) {
               const nu = map.get(it.uid);
-              if (nu) this.db.rekeyMessage(this.accountId, it.id, mkId(tf.path, nu), { folder: tf.path, uid: nu });
+              if (nu) { this.db.rekeyMessage(this.accountId, it.id, mkId(tf.path, nu), { folder: tf.path, uid: nu }); rekeyed.set(it.id, mkId(tf.path, nu)); }
               else this.db.deleteMessages(this.accountId, [it.id]); // server didn't tell us the new UID; next sync re-adds it
               const cur = this.db.getMessage(this.accountId, nu ? mkId(tf.path, nu) : it.id);
               if (cur) {
@@ -250,6 +251,7 @@ class ImapProvider {
         }
       } finally { lock.release(); }
     }
+    return { rekeyed };
   }
   async fetchFull(id) {
     const { path, uid } = splitId(id);
@@ -306,6 +308,24 @@ class ImapProvider {
     await this.syncLabels();
     return this.folders.find(f => f.path === r.path) || { id: name, name };
   }
+  async renameLabel(id, name) {
+    const f = this.folderFor(id); if (!f) throw new Error('Folder not found');
+    const c = await this.conn();
+    const parent = f.path.includes(f.delimiter) ? f.path.slice(0, f.path.lastIndexOf(f.delimiter) + 1) : '';
+    await c.mailboxRename(f.path, parent + name.replace(/\//g, f.delimiter));
+    this.db.deleteFolderMessages(this.accountId, f.path);
+    this.db.prep('DELETE FROM imap_folders WHERE account_id = ? AND path = ?').run(this.accountId, f.path);
+    await this.syncLabels();
+  }
+  async deleteLabel(id) {
+    const f = this.folderFor(id); if (!f) throw new Error('Folder not found');
+    const c = await this.conn();
+    await c.mailboxDelete(f.path);
+    this.db.deleteFolderMessages(this.accountId, f.path);
+    this.db.prep('DELETE FROM imap_folders WHERE account_id = ? AND path = ?').run(this.accountId, f.path);
+    await this.syncLabels();
+  }
+  async setLabelColor(id, bg, fg) { this.db.updateLabel(this.accountId, id, { color_bg: bg || null, color_fg: fg || null }); }
   async saveDraft({ raw, remoteId }) {
     const df = await this.ensureFolder('DRAFT', 'Drafts');
     const c = await this.conn();

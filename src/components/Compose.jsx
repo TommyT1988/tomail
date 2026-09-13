@@ -67,10 +67,16 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
     setSending(true); clearTimeout(saveTimer.current);
     try {
       const { html, attachments } = extractInlineImages(f.html);
-      await window.mail.actions.send({ accountId, to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, html, text: htmlToText(html), quotedHtml: f.quotedHtml, quotedText: f.quotedText,
-        attachments: [...f.attachments, ...attachments], replyTo: orig ? { accountId: orig.accountId, id: orig.id } : draft.replyTo, mode: draft.mode, forwardAttachments: draft.mode === 'forward' && f.includeOrigAtts, draftId });
+      const payload = { accountId, to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, html, text: htmlToText(html), quotedHtml: f.quotedHtml, quotedText: f.quotedText,
+        attachments: [...f.attachments, ...attachments], replyTo: orig ? { accountId: orig.accountId, id: orig.id } : draft.replyTo, mode: draft.mode, forwardAttachments: draft.mode === 'forward' && f.includeOrigAtts, draftId };
+      if (standalone && (prefs?.sendDelaySec ?? 5) > 0) {
+        // keep the draft so Undo in the main window can reopen it; the main process sends after the delay
+        dirty.current = true; await save(); payload.draftId = latest.current.draftId;
+        await window.mail.send.queue(payload); onClose(); return;
+      }
+      await window.mail.actions.send(payload);
       toast('Message sent'); onClose();
-    } catch (e) { toast('Send failed: ' + e.message, true); }
+    } catch (e) { if (e.code === 'OUTBOX') { toast(e.message); onClose(); } else toast('Send failed: ' + e.message, true); }
     finally { setSending(false); }
   };
   const pick = async () => { const files = await window.mail.compose.pickFiles(); if (files.length) { setF(x => ({ ...x, attachments: [...x.attachments, ...files] })); dirty.current = true; scheduleSave(); } };

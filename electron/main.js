@@ -12,9 +12,10 @@ const { seedDemo, DemoProvider } = require('./demo');
 const { autoconfig, ImapProvider } = require('./providers/imap');
 const { buildDoc } = require('./printDoc');
 const { runRules } = require('./rules');
+const { createLogger } = require('./logger');
 
 const DEMO = process.env.MAIL_DEMO === '1';
-const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+let log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);   // replaced by the file logger once userData is known
 
 // The renderer is served from app://tomail/ rather than file:// so it has a real origin
 // (sandboxed same-origin message frames can be measured; storage is stable).
@@ -33,6 +34,8 @@ function registerAppProtocol() {
 }
 app.setName('Tomail');
 app.setPath('userData', path.join(app.getPath('appData'), DEMO ? 'tomail-demo' : 'tomail'));
+log = createLogger(path.join(app.getPath('userData'), 'logs', 'tomail.log'));
+const ICON = path.join(__dirname, '..', 'build', 'icon.png');
 if (process.platform === 'win32') app.setAppUserModelId('app.tomail.desktop');
 
 let win, db, settings, accounts, actions;
@@ -40,7 +43,10 @@ const composeWins = new Map();   // id → { win, payload }
 let composeSeq = 0;
 const syncStatus = {};
 let lastCheckedAt = null;
-let syncTimer, snoozeTimer, changeTimer;
+let syncTimer, snoozeTimer, changeTimer, outboxTimer, housekeepTimer;
+const pendingSends = new Map();  // id → { timer, payload, subject }
+let sendSeq = 0;
+const messageWins = new Map();
 const syncing = new Set();
 const lastSyncAt = new Map();   // accountId → ms
 const pushTimers = new Map();
@@ -103,7 +109,7 @@ function notifyNewMail(accountId, ids) {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1280, height: 1015, minWidth: 900, minHeight: 600, title: `Tomail ${app.getVersion()}`, autoHideMenuBar: true, show: false,
+    width: 1280, height: 1015, minWidth: 900, minHeight: 600, title: `Tomail ${app.getVersion()}`, autoHideMenuBar: true, show: false, icon: ICON,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1f22' : '#f6f6f6',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true },
   });
@@ -143,6 +149,9 @@ function createWindow() {
         await js(`(() => { const r = [...document.querySelectorAll('.row')].find(r => r.textContent.includes('Quote for 20')); if (r) r.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); })()`);
         await wait(1000); await shot('5-thread.png');
         await js(`(() => { const b = [...document.querySelectorAll('.topbar button')].find(b => /Settings/.test(b.textContent)); b && b.click(); })()`);
+        await js(`window.mail.messages.openWindow(1, 'demo9')`);
+        await wait(1500);
+        { const mw = [...messageWins.values()][0]; if (mw && !mw.isDestroyed()) { fs.writeFileSync(path.join(dir, '9-message-window.png'), (await mw.webContents.capturePage()).toPNG()); mw.close(); } }
         await wait(600); await shot('6-settings.png');
         await js(`(() => { const b = [...document.querySelectorAll('.settings .tabs button')].find(b => /Rules/.test(b.textContent)); b && b.click(); })()`);
         await wait(500); await shot('8-rules.png');
@@ -162,7 +171,7 @@ function openComposeWindow(payload) {
   const prefs = settings.get().prefs;
   const b = prefs.composeBounds || {};
   const cw = new BrowserWindow({
-    width: b.width || 900, height: b.height || 720, x: b.x, y: b.y, minWidth: 620, minHeight: 460, title: 'New message', autoHideMenuBar: true, show: false,
+    width: b.width || 900, height: b.height || 720, x: b.x, y: b.y, minWidth: 620, minHeight: 460, title: 'New message', autoHideMenuBar: true, show: false, icon: ICON,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1f22' : '#f6f6f6',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true },
   });
@@ -185,6 +194,48 @@ function openComposeWindow(payload) {
   cw.loadURL((dev || 'app://tomail/index.html') + '#compose/' + id);
   return id;
 }
+/** A message in its own window (#message/<accountId>/<id>). */
+function openMessageWindow(accountId, id) {
+  const key = `${accountId}:${id}`;
+  const existing = messageWins.get(key);
+  if (existing && !existing.isDestroyed()) { existing.focus(); return true; }
+  const b = settings.get().prefs.messageBounds || {};
+  const mw = new BrowserWindow({ width: b.width || 900, height: b.height || 700, minWidth: 520, minHeight: 360, title: 'Message', autoHideMenuBar: true, show: false, icon: ICON,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1f22' : '#f6f6f6',
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  messageWins.set(key, mw);
+  mw.once('ready-to-show', () => mw.show());
+  mw.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:|^mailto:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  mw.on('closed', () => messageWins.delete(key));
+  const remember = () => { if (!mw.isDestroyed() && !mw.isMinimized() && !mw.isMaximized()) settings.set({ prefs: { messageBounds: mw.getBounds() } }); };
+  mw.on('resize', remember); mw.on('move', remember);
+  const dev = process.env.VITE_DEV_SERVER_URL;
+  mw.loadURL((dev || 'app://tomail/index.html') + `#message/${accountId}/${encodeURIComponent(id)}`);
+  return true;
+}
+/** Send with an undo window: the draft is kept until the timer fires. */
+function queueSend(payload) {
+  const id = ++sendSeq;
+  const delay = Math.max(0, settings.get().prefs.sendDelaySec ?? 5) * 1000;
+  const fire = async () => {
+    pendingSends.delete(id);
+    send('send:state', { id, state: 'sending', subject: payload.subject });
+    try { await actions.send(payload); send('send:state', { id, state: 'sent', subject: payload.subject }); }
+    catch (e) { send('send:state', { id, state: e.code === 'OUTBOX' ? 'outbox' : 'failed', subject: payload.subject, error: e.message, draftId: payload.draftId, accountId: payload.accountId }); }
+  };
+  if (!delay) { fire(); return id; }
+  pendingSends.set(id, { timer: setTimeout(fire, delay), payload });
+  send('send:state', { id, state: 'pending', subject: payload.subject, until: Date.now() + delay, draftId: payload.draftId, accountId: payload.accountId });
+  return id;
+}
+function housekeeping() {
+  try {
+    const days = settings.get().prefs.bodyRetentionDays || 0;
+    if (days) { const n = db.pruneBodies(days); if (n) log(`housekeeping: cleared ${n} cached bodies older than ${days} days`); }
+    const last = db.kvGet('lastVacuum') || 0;
+    if (Date.now() - last > 7 * 86400000) { db.vacuum(); log('housekeeping: database compacted'); }
+  } catch (e) { log('housekeeping:', e.message); }
+}
 function handle(channel, fn) {
   ipcMain.handle(channel, async (_e, ...args) => {
     try { return await fn(...args); }
@@ -194,7 +245,38 @@ function handle(channel, fn) {
 function applyTheme() { nativeTheme.themeSource = settings.get().prefs.theme || 'system'; }
 
 function registerIpc() {
-  handle('app:info', () => ({ version: app.getVersion(), demo: DEMO, userData: app.getPath('userData'), encrypted: safeStorage.isEncryptionAvailable(), hasGoogleClient: accounts.hasClient(), packaged: app.isPackaged, platform: process.platform }));
+  handle('app:info', () => ({ version: app.getVersion(), demo: DEMO, userData: app.getPath('userData'), encrypted: safeStorage.isEncryptionAvailable(), hasGoogleClient: accounts.hasClient(), packaged: app.isPackaged, platform: process.platform, logFile: log.file }));
+  handle('app:openLogs', () => { shell.showItemInFolder(log.file); return true; });
+  handle('app:reportProblem', (description) => {
+    const redact = (s) => String(s).replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '<email>');
+    const body = `**What happened**\n${description || ''}\n\n**Environment**\nTomail ${app.getVersion()} · ${process.platform} ${process.arch} · Electron ${process.versions.electron}\nAccounts: ${db.listAccounts().map(a => a.kind).join(', ') || 'none'}\n\n**Recent log** (addresses redacted)\n\`\`\`\n${redact(log.tail(60))}\n\`\`\``;
+    const url = 'https://github.com/TommyT1988/tomail/issues/new?' + new URLSearchParams({ title: `Problem: ${(description || '').slice(0, 60) || 'describe it here'}`, body: body.slice(0, 7000) }).toString();
+    shell.openExternal(url); return true;
+  });
+  handle('app:dbInfo', () => { let size = 0; try { size = fs.statSync(path.join(app.getPath('userData'), 'mail.sqlite')).size; } catch {} return { size, ...db.stats() }; });
+  handle('app:compactDb', () => { const days = settings.get().prefs.bodyRetentionDays || 0; const pruned = days ? db.pruneBodies(days) : 0; db.vacuum(); notifyChanged(); return { pruned }; });
+  handle('messages:openWindow', (accountId, id) => openMessageWindow(accountId, id));
+  handle('send:queue', (payload) => queueSend(payload));
+  handle('send:cancel', (id) => { const p = pendingSends.get(id); if (!p) return false; clearTimeout(p.timer); pendingSends.delete(id); send('send:state', { id, state: 'cancelled', subject: p.payload.subject, draftId: p.payload.draftId, accountId: p.payload.accountId }); return true; });
+  handle('outbox:list', () => db.listOutbox());
+  handle('outbox:sendNow', (id) => actions.sendOutboxItem(id));
+  handle('outbox:remove', (id) => { db.removeOutbox(id); notifyChanged(); return true; });
+  handle('labels:rename', (accountId, id, name) => actions.renameLabel(accountId, id, name));
+  handle('labels:remove', (accountId, id) => actions.deleteLabel(accountId, id));
+  handle('labels:color', (accountId, id, bg, fg) => actions.setLabelColor(accountId, id, bg, fg));
+  handle('attachments:data', async (accountId, messageId, att) => {
+    if ((att.size || 0) > 12 * 1024 * 1024) throw new Error('Attachment too large to preview');
+    const data = await actions.getAttachment(accountId, messageId, att.attachmentId);
+    return `data:${att.mimeType || 'application/octet-stream'};base64,${Buffer.from(data).toString('base64')}`;
+  });
+  handle('attachments:preview', async (accountId, messageId, att) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tomail-'));
+    const file = path.join(dir, (att.filename || 'attachment').replace(/[\\/:*?"<>|]/g, '_'));
+    fs.writeFileSync(file, await actions.getAttachment(accountId, messageId, att.attachmentId));
+    const pw = new BrowserWindow({ width: 1000, height: 800, title: att.filename, autoHideMenuBar: true, icon: ICON, webPreferences: { sandbox: true, plugins: true } });
+    pw.loadFile(file);
+    return true;
+  });
   handle('app:setBadge', (count, dataUrl) => {
     if (process.platform === 'win32') { if (win && !win.isDestroyed()) win.setOverlayIcon(count > 0 && dataUrl ? nativeImage.createFromDataURL(dataUrl) : null, count > 0 ? `${count} unread` : ''); }
     else app.setBadgeCount(count || 0);
@@ -247,6 +329,7 @@ function registerIpc() {
 
   for (const a of ['markRead', 'star', 'archive', 'trash', 'untrash', 'spam', 'move', 'snooze', 'unsnooze', 'send', 'deleteForever', 'emptyFolder', 'respondInvite'])
     handle('actions:' + a, (...args) => actions[a](...args));
+  handle('actions:undo', (ids, inverse) => actions.modify(ids, inverse));
   handle('drafts:list', () => ({ local: actions.listDrafts(), remote: actions.remoteDraftMessages() }));
   handle('rules:list', () => db.listRules());
   handle('rules:save', (r) => { const s = db.saveRule(r); notifyChanged(); return s; });
@@ -297,12 +380,14 @@ app.whenReady().then(async () => {
   applyTheme();
   db = new MailDb(DEMO ? ':memory:' : path.join(userData, 'mail.sqlite'));
   accounts = new AccountManager({ db, settings, safeStorage, log });
-  if (DEMO) { seedDemo(db); const dp = new DemoProvider(); accounts.provider = () => dp; }
+  if (DEMO) { seedDemo(db); const dp = new DemoProvider(db); accounts.provider = () => dp; }
   actions = new Actions({ db, providers: (id) => accounts.provider(id), onChange: notifyChanged, log });
   registerIpc();
   createWindow();
   syncAll().catch(() => {});
   scheduleSync();
+  outboxTimer = setInterval(() => actions.processOutbox().then(n => { if (n) log(`outbox: sent ${n}`); }).catch(e => log('outbox:', e.message)), 60000);
+  housekeepTimer = setTimeout(housekeeping, 90000); setInterval(housekeeping, 24 * 3600000);
   snoozeTimer = setInterval(() => actions.wakeDueSnoozes().then(n => { if (n) notifyChanged(); }).catch(e => log('snooze wake:', e.message)), 30000);
   if (app.isPackaged && !DEMO) {
     try {
@@ -317,4 +402,4 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { clearInterval(syncTimer); clearInterval(snoozeTimer); for (const a of db?.listAccounts?.() || []) { try { accounts.providers.get(a.id)?.cancel(); } catch {} } try { db?.close(); } catch {} });
+app.on('before-quit', () => { clearInterval(syncTimer); clearInterval(snoozeTimer); clearInterval(outboxTimer); clearTimeout(housekeepTimer); for (const a of db?.listAccounts?.() || []) { try { accounts.providers.get(a.id)?.cancel(); } catch {} } try { db?.close(); } catch {} });

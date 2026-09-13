@@ -29,17 +29,29 @@ function BodyFrame({ html, allowRemote, autoHeight }) {
   return <iframe ref={ref} title="message" sandbox={autoHeight ? 'allow-same-origin allow-popups allow-popups-to-escape-sandbox' : 'allow-popups allow-popups-to-escape-sandbox'} srcDoc={doc} onLoad={measure} style={autoHeight ? { height: h } : undefined} />;
 }
 
+const isImage = (a) => /^image\//i.test(a.mimeType || '') && (a.size || 0) < 12 * 1024 * 1024;
+const canPreview = (a) => isImage(a) || /pdf$/i.test(a.mimeType || '') || /\.pdf$/i.test(a.filename || '') || /^text\//i.test(a.mimeType || '');
+function Thumb({ m, a }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => { let on = true; window.mail.attachments.data(m.accountId, m.id, a).then(d => on && setSrc(d)).catch(() => {}); return () => { on = false; }; }, [m.accountId, m.id, a.attachmentId]);
+  return src ? <img src={src} alt={a.filename} className="thumb" onClick={() => window.mail.attachments.preview(m.accountId, m.id, a).catch(e => alert(e.message))} title="Click to open full size" /> : <span className="thumb ph" />;
+}
 function Attachments({ m, cls = 'atts' }) {
   if (!m.attachments?.length) return null;
+  const images = m.attachments.filter(isImage);
   return (
-    <div className={cls}>
-      {m.attachments.map((a, i) => (
-        <span className="att" key={i} title={a.mimeType}><Icon name="clip" size={12} /> {a.filename} <span className="sz">{fmtSize(a.size)}</span>
-          <button onClick={() => window.mail.attachments.open(m.accountId, m.id, a).catch(e => alert(e.message))}>Open</button>
-          <button onClick={() => window.mail.attachments.save(m.accountId, m.id, a).catch(e => alert(e.message))}>Save</button>
-        </span>
-      ))}
-    </div>
+    <>
+      <div className={cls}>
+        {m.attachments.map((a, i) => (
+          <span className="att" key={i} title={a.mimeType}><Icon name="clip" size={12} /> {a.filename} <span className="sz">{fmtSize(a.size)}</span>
+            {canPreview(a) && <button onClick={() => window.mail.attachments.preview(m.accountId, m.id, a).catch(e => alert(e.message))}>Preview</button>}
+            <button onClick={() => window.mail.attachments.open(m.accountId, m.id, a).catch(e => alert(e.message))}>Open</button>
+            <button onClick={() => window.mail.attachments.save(m.accountId, m.id, a).catch(e => alert(e.message))}>Save</button>
+          </span>
+        ))}
+      </div>
+      {images.length > 0 && <div className="thumbs">{images.map((a, i) => <Thumb key={i} m={m} a={a} />)}</div>}
+    </>
   );
 }
 
@@ -68,13 +80,13 @@ function InviteCard({ m, onRespond }) {
   );
 }
 
-function Header({ message, onPrint, extra }) {
+function Header({ message, onPrint, extra, onPopOut }) {
   const from = { name: message.fromName, email: message.fromEmail };
   return (
     <div className="hdr">
       <h2>{message.subject || '(no subject)'}</h2>
       <div className="line first"><span><b>{fmtAddrFull(from)}</b></span><span className="when">{fmtFull(message.date)}</span>
-        <span className="hbtns"><button title="Print" onClick={() => onPrint(message)}><Icon name="external" size={12} /> Print</button>{extra}</span></div>
+        <span className="hbtns">{onPopOut && <button title="Open in a new window (o)" onClick={() => onPopOut(message)}><Icon name="external" size={12} /> Window</button>}<button title="Print" onClick={() => onPrint(message)}>Print</button>{extra}</span></div>
       <div className="line"><span>to {addrList(message.to) || '—'}</span>{message.cc?.length > 0 && <span>· cc {addrList(message.cc)}</span>}</div>
       {message.labels?.length > 0 && <div className="labs">{message.labels.filter(l => !['UNREAD', 'CATEGORY_PERSONAL'].includes(l)).map(l => <span key={l}>{l.replace(/^CATEGORY_/, '').toLowerCase()}</span>)}</div>}
     </div>
@@ -118,7 +130,7 @@ function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo })
   );
 }
 
-export default function ReadingPane({ message, thread, loading, prefs, error, onRespond, onPrint, onReplyTo }) {
+export default function ReadingPane({ message, thread, loading, prefs, error, onRespond, onPrint, onReplyTo, onPopOut }) {
   const [allow, setAllow] = useState({});
   const [openIds, setOpenIds] = useState(new Set());
   useEffect(() => { if (thread?.length) setOpenIds(new Set([thread[thread.length - 1].id, ...thread.filter(m => m.unread).map(m => m.id)])); }, [thread?.map(m => m.id).join(',')]); // eslint-disable-line
@@ -130,7 +142,7 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
     return (
       <div className="read">
         <div className="hdr"><h2>{latest.subject || message.subject || '(no subject)'}</h2><div className="line"><span className="muted">{thread.length} messages in this conversation</span>
-          <span className="hbtns"><button onClick={() => setOpenIds(new Set(thread.map(m => m.id)))}>Expand all</button><button onClick={() => setOpenIds(new Set([latest.id]))}>Collapse</button></span></div></div>
+          <span className="hbtns">{onPopOut && <button onClick={() => onPopOut(latest)}><Icon name="external" size={12} /> Window</button>}<button onClick={() => setOpenIds(new Set(thread.map(m => m.id)))}>Expand all</button><button onClick={() => setOpenIds(new Set([latest.id]))}>Collapse</button></span></div></div>
         <div className="thread">
           {thread.map(m => <ThreadCard key={m.id} m={m.id === message.id ? message : m} open={openIds.has(m.id)} prefs={prefs} onRespond={onRespond} onPrint={onPrint} onReplyTo={onReplyTo}
             onToggle={() => setOpenIds(s => { const n = new Set(s); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })} />)}
@@ -140,7 +152,7 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
   }
   return (
     <div className="read">
-      <Header message={message} onPrint={onPrint} />
+      <Header message={message} onPrint={onPrint} onPopOut={onPopOut} />
       {message.calendar && <InviteCard m={message} onRespond={onRespond} />}
       <Attachments m={message} />
       {error && <div className="imgbar" style={{ background: '#fde8e6', borderColor: '#f3b5ae' }}>⚠ {error}</div>}

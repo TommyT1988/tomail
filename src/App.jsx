@@ -4,7 +4,7 @@ import MessageList from './components/MessageList.jsx';
 import ReadingPane from './components/ReadingPane.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import { Dropdown, MI, MarkMenu, QuickActionsMenu, SnoozeMenu, FilterMenu } from './components/Menus.jsx';
-import { ago, gmailQuery, keyOf, sameView } from './util.js';
+import { ago, gmailQuery, keyOf, sameView, parseSearch } from './util.js';
 import Icon from './components/Icons.jsx';
 
 const PAGE = 100;
@@ -43,6 +43,11 @@ export default function App() {
   const [ruleSeed, setRuleSeed] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [toastMsg, setToastMsg] = useState(null);
+  const [sendState, setSendState] = useState(null);
+  const [outbox, setOutbox] = useState([]);
+  const [labelMenu, setLabelMenu] = useState(null);
+  const [shortcuts, setShortcuts] = useState(false);
+  const undoRef = useRef(null);
   const [signingIn, setSigningIn] = useState(false);
   const [updateReady, setUpdateReady] = useState(null);
   const [listH, setListH] = useState(() => Number(localStorage.getItem('listH')) || 440);
@@ -53,7 +58,7 @@ export default function App() {
   const markTimer = useRef(null);
   const draftsRef = useRef(drafts); draftsRef.current = drafts;
 
-  const toast = useCallback((m, err) => { setToastMsg({ m, err }); setTimeout(() => setToastMsg(t => (t?.m === m ? null : t)), err ? 6000 : 2500); }, []);
+  const toast = useCallback((m, err, undo) => { setToastMsg({ m, err, undo }); setTimeout(() => setToastMsg(t => (t?.m === m ? null : t)), err ? 6000 : undo ? 8000 : 2500); }, []);
   const labelsById = useMemo(() => { const o = {}; for (const [aid, ls] of Object.entries(labels)) o[aid] = Object.fromEntries(ls.map(l => [l.id, l])); return o; }, [labels]);
   const setView = useCallback((v) => { setViewRaw(v); setSelected([]); setAnchor(null); setMessage(null); setThread(null); setMsgError(null); }, []);
   const setThreaded = (v) => { setThreadedRaw(v); localStorage.setItem('threaded', v ? '1' : '0'); setSelected([]); setMessage(null); setThread(null); };
@@ -66,8 +71,8 @@ export default function App() {
 
   // ── loaders ──
   const loadMeta = useCallback(async () => {
-    const [accs, c, st, d] = await Promise.all([mail.accounts.list(), mail.messages.counts(), mail.sync.status(), mail.drafts.list()]);
-    setAccounts(accs); setCounts(c); setStatus(st); setDrafts(d);
+    const [accs, c, st, d, ob] = await Promise.all([mail.accounts.list(), mail.messages.counts(), mail.sync.status(), mail.drafts.list(), mail.outbox.list()]);
+    setAccounts(accs); setCounts(c); setStatus(st); setDrafts(d); setOutbox(ob);
     const ls = {}; await Promise.all(accs.map(async a => { ls[a.id] = await mail.labels.list(a.id); })); setLabels(ls);
     const unread = c?.favourites?.inboxUnread || 0;
     mail.app.setBadge(unread, unread > 0 ? drawBadge(unread) : null).catch(() => {});
@@ -79,6 +84,7 @@ export default function App() {
   }, []);
   const loadList = useCallback(async (v, { append = false } = {}) => {
     if (v.kind === 'drafts') { const d = await mail.drafts.list(); setDrafts(d); const it = draftItems(v, d); setItems(it); setTotal(it.length); setHasMore(false); return; }
+    if (v.kind === 'outbox') { const ob = await mail.outbox.list(); setOutbox(ob); const it = ob.map(o => ({ accountId: o.accountId, id: 'outbox:' + o.id, outboxId: o.id, isOutbox: true, subject: o.subject, toText: o.to, snippet: o.lastError || '', fromName: 'Outbox', fromEmail: '', date: o.createdAt, size: 0, labels: [], to: [], unread: false, starred: false })); setItems(it); setTotal(it.length); setHasMore(false); return; }
     setLoading(true);
     try {
       const offset = append ? itemsRef.current.length : 0;
@@ -99,9 +105,10 @@ export default function App() {
     const off2 = mail.on('sync:status', (s) => setStatus(s));
     const off3 = mail.on('app:update-ready', (u) => setUpdateReady(u));
     const off4 = mail.on('app:open-message', ({ accountId, id }) => { setView(HOME); setTimeout(() => setSelected([{ accountId, id }]), 300); });
+    const off5 = mail.on('send:state', (s) => { if (s.state === 'pending' || s.state === 'sending') setSendState(s); else { setSendState(null); if (s.state === 'sent') toast('Message sent'); else if (s.state === 'outbox') toast(s.error); else if (s.state === 'failed') toast('Send failed: ' + s.error + (s.draftId ? ' — the draft is kept' : ''), true); } loadMeta(); });
     const mq = window.matchMedia('(prefers-color-scheme: dark)'); const onMq = () => { mail.settings.get().then(s => applyTheme(s.prefs.theme)); tick(x => x + 1); }; mq.addEventListener('change', onMq);
     const t = setInterval(() => tick(x => x + 1), 30000);
-    return () => { off1(); off2(); off3(); off4(); clearInterval(t); mq.removeEventListener('change', onMq); };
+    return () => { off1(); off2(); off3(); off4(); off5(); clearInterval(t); mq.removeEventListener('change', onMq); };
   }, [loadMeta, loadList, setView]);
   useEffect(() => { if (!settingsOpen) mail.settings.get().then(s => { setPrefs(s.prefs); applyTheme(s.prefs.theme); }); }, [settingsOpen]);
 
@@ -138,6 +145,7 @@ export default function App() {
   const curIndex = () => { const s = selected[selected.length - 1]; return s ? itemsRef.current.findIndex(i => i.id === s.id && i.accountId === s.accountId) : -1; };
   const openItem = async (m) => {
     if (!m) return;
+    if (m.isOutbox) { try { await mail.outbox.sendNow(m.outboxId); toast('Sent'); loadList(view); } catch (e) { toast(e.message, true); } return; }
     if (!m.isDraft) { openCompose('reply', m); return; }   // double-click a message = reply
     if (m.remoteDraft) { try { const d = await mail.drafts.openRemote(m.accountId, m.id); mail.compose.open({ mode: 'new', accountId: m.accountId, draftId: d.id }); } catch (e) { toast(e.message, true); } }
     else mail.compose.open({ mode: 'new', accountId: m.accountId, draftId: m.draftId });
@@ -151,35 +159,39 @@ export default function App() {
     for (const s of selected) { const it = itemsRef.current.find(i => i.id === s.id && i.accountId === s.accountId); if (it?.threadCount > 1) { const th = await mail.messages.thread(s.accountId, it.threadId, { includeTrash: ['TRASH', 'SPAM'].includes(view.labelId) }); out.push(...th.map(x => ({ accountId: x.accountId, id: x.id }))); } else out.push(s); }
     return out;
   };
-  const act = async (fn, okMsg) => {
+  /** fn(targets) → result of actions.modify ({ids}) when undoable; inverse = { add, remove } to apply to those ids. */
+  const act = async (fn, okMsg, inverse) => {
     try {
       const i = curIndex();
       const targets = await expandTargets();
-      await fn(targets);
-      if (okMsg) toast(okMsg.replace('%n', String(targets.length)));
+      const res = await fn(targets);
+      const undo = inverse && res?.ids?.length ? async () => { try { await mail.actions.undo(res.ids, inverse); toast('Undone'); } catch (e) { toast('Could not undo: ' + e.message, true); } } : null;
+      if (okMsg) toast(okMsg.replace('%n', String(targets.length)), false, undo);
       if (okMsg && i >= 0) { const rest = itemsRef.current.filter(x => !selected.some(s => keyOf(s) === keyOf(x))); const next = rest[Math.min(i, rest.length - 1)]; setSelected(next ? [{ accountId: next.accountId, id: next.id }] : []); }
     } catch (e) { toast(e.message, true); }
   };
   const inTrash = view.kind === 'label' && ['TRASH', 'SPAM'].includes(view.labelId);
   const selAccount = accounts.find(a => a.id === selected[0]?.accountId) || accounts.find(a => a.id === view.accountId);
-  const doArchive = () => act((t) => mail.actions.archive(t), 'Archived %n');
-  const doTrash = () => inTrash ? doDeleteForever() : act((t) => mail.actions.trash(t), 'Deleted %n');
+  const doArchive = () => act((t) => mail.actions.archive(t), 'Archived %n', { add: ['INBOX'] });
+  const doTrash = () => inTrash ? doDeleteForever() : act((t) => mail.actions.trash(t), 'Deleted %n', { remove: ['TRASH'], add: [view.labelId === 'SPAM' ? 'SPAM' : 'INBOX'] });
   const doDeleteForever = () => { if (!confirm(`Permanently delete ${selected.length} message(s)? This cannot be undone.`)) return; act((t) => mail.actions.deleteForever(t), 'Deleted forever: %n'); };
-  const doRestore = () => act((t) => mail.actions.untrash(t), 'Restored %n to Inbox');
+  const doRestore = () => act((t) => mail.actions.untrash(t), 'Restored %n to Inbox', { add: [view.labelId], remove: ['INBOX'] });
   const doEmpty = async () => { const name = view.labelId === 'SPAM' ? 'Junk' : 'Trash'; if (!confirm(`Permanently delete everything in ${name} for ${selAccount?.email}?`)) return; try { const n = await mail.actions.emptyFolder(view.accountId, view.labelId); toast(`${name} emptied (${n})`); } catch (e) { toast(e.message, true); } };
-  const doMark = (what) => act((t) => ({ read: () => mail.actions.markRead(t, true), unread: () => mail.actions.markRead(t, false), flag: () => mail.actions.star(t, true), unflag: () => mail.actions.star(t, false), spam: () => mail.actions.spam(t, true), notspam: () => mail.actions.spam(t, false) })[what]());
+  const doMark = (what) => act((t) => ({ read: () => mail.actions.markRead(t, true), unread: () => mail.actions.markRead(t, false), flag: () => mail.actions.star(t, true), unflag: () => mail.actions.star(t, false), spam: () => mail.actions.spam(t, true), notspam: () => mail.actions.spam(t, false) })[what](), what === 'spam' ? 'Marked as junk' : what === 'notspam' ? 'Not junk' : null, what === 'spam' ? { remove: ['SPAM'], add: ['INBOX'] } : what === 'notspam' ? { add: ['SPAM'], remove: ['INBOX'] } : null);
   const doSnooze = (until) => act((t) => mail.actions.snooze(t, until), `Snoozed until ${new Date(until).toLocaleString('en-GB')}`);
-  const doMove = (labelId) => act((t) => mail.actions.move(t, labelId, view.kind === 'label' ? view.labelId : (view.kind === 'all-inboxes' ? 'INBOX' : null)), 'Moved %n');
+  const doMove = (labelId) => { const from = view.kind === 'label' ? view.labelId : (view.kind === 'all-inboxes' ? 'INBOX' : null); act((t) => mail.actions.move(t, labelId, from), 'Moved %n', { remove: [labelId], add: from ? [from] : [] }); };
   const openCompose = (mode, m = message) => {
     if (mode === 'new') { mail.compose.open({ mode, accountId: view.accountId || selAccount?.id || accounts[0]?.id }).catch(e => toast(e.message, true)); return; }
     if (!m) { toast('Select a message first', true); return; }
     mail.compose.open({ mode, accountId: m.accountId, originalId: m.id }).catch(e => toast(e.message, true));
   };
   const runSearch = (deep) => {
-    const q = search.trim();
-    const filters = view.filters;
-    if (!q && !deep) { setView({ ...HOME, filters }); return; }
-    if (!deep) { setView({ kind: 'search', q, filters }); return; }
+    const raw = search.trim();
+    const parsed = parseSearch(raw, Object.values(labels).flat());
+    const filters = { ...(view.filters || {}), ...parsed.filters };
+    const q = parsed.text;
+    if (!raw && !deep) { setView({ ...HOME, filters: view.filters }); return; }
+    if (!deep) { setView(q ? { kind: 'search', q, filters } : { ...HOME, filters }); return; }
     setLoading(true);
     mail.messages.deepSearch(gmailQuery(q, filters), filters?.accountId || null).then(ids => setView({ kind: 'ids', ids, q })).catch(e => toast(e.message, true)).finally(() => setLoading(false));
   };
@@ -188,13 +200,15 @@ export default function App() {
     const i = curIndex(); const k = e.key; const cur = itemsRef.current[i];
     if (k === 'ArrowDown') { e.preventDefault(); selectIndex(Math.min(itemsRef.current.length - 1, i + 1)); }
     else if (k === 'ArrowUp') { e.preventDefault(); selectIndex(Math.max(0, i - 1)); }
-    else if (k === 'Enter') { if (cur?.isDraft) openItem(cur); }
+    else if (k === 'Enter') { if (cur?.isDraft || cur?.isOutbox) openItem(cur); }
     else if (k === 'Delete' || k === 'Backspace') { if (cur?.isDraft) { mail.drafts.remove(cur.draftId).then(() => loadList(view)); return; } if (selected.length) { e.preventDefault(); doTrash(); } }
     else if (k === 'e') { if (selected.length) doArchive(); }
     else if (k === 'u') { if (selected.length) doMark(cur?.unread || cur?.threadUnread ? 'read' : 'unread'); }
     else if (k === 's') { if (selected.length) doMark(cur?.starred ? 'unflag' : 'flag'); }
     else if (k === 'r') openCompose('reply'); else if (k === 'a') openCompose('replyAll'); else if (k === 'f') openCompose('forward'); else if (k === 'n') openCompose('new');
     else if (k === 'p') { if (message) mail.messages.print(message.accountId, message.id); }
+    else if (k === 'o') { if (message) mail.messages.openWindow(message.accountId, message.id); }
+    else if (k === '?') { setShortcuts(true); }
     else if (k === 'Escape') setSelected([]);
   };
   const startDrag = (e) => {
@@ -256,7 +270,7 @@ export default function App() {
         <button disabled={!hasSel} onClick={doTrash} title={inTrash ? 'Delete permanently' : 'Move to Trash'}><span className="ico"><Icon name="trash" /></span>{inTrash ? 'Delete forever' : 'Delete'}</button>
       </div>
       <div className={'body' + (sidebarOpen ? '' : ' nosidebar')}>
-        {sidebarOpen && <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} onReorder={(ids) => mail.accounts.reorder(ids).then(loadMeta)} />}
+        {sidebarOpen && <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} onReorder={(ids) => mail.accounts.reorder(ids).then(loadMeta)} outboxCount={outbox.length} onLabelMenu={(e, accountId, l) => setLabelMenu({ x: e.clientX, y: e.clientY, accountId, label: l })} />}
         <div className="main">
           {!accounts.length && info && !info.demo ? (
             <div className="onboard">
@@ -279,10 +293,11 @@ export default function App() {
               </div>
               <div className="divider" onMouseDown={startDrag} />
               <div className="read-wrap">
-                {view.kind === 'drafts' && selected.length === 1 ? <div className="read"><div className="empty"><div className="big"><Icon name="edit" size={56} style={{ strokeWidth: 1 }} /></div><div><button className="primary" onClick={() => openItem(itemsRef.current.find(i => i.id === selected[0].id))}>Open draft</button> <button onClick={() => { const it = itemsRef.current.find(i => i.id === selected[0].id); if (it?.draftId) mail.drafts.remove(it.draftId).then(() => loadList(view)); else if (it?.remoteDraft) mail.actions.trash([{ accountId: it.accountId, id: it.id }]); }}>Delete</button></div></div></div>
+                {view.kind === 'outbox' && selected.length === 1 ? <div className="read"><div className="empty"><div className="big"><Icon name="send" size={56} style={{ strokeWidth: 1 }} /></div><div>Waiting for a connection{itemsRef.current.find(i => i.id === selected[0].id)?.snippet ? ': ' + itemsRef.current.find(i => i.id === selected[0].id).snippet : ''}</div><div><button className="primary" onClick={() => openItem(itemsRef.current.find(i => i.id === selected[0].id))}>Send now</button> <button onClick={() => { const it = itemsRef.current.find(i => i.id === selected[0].id); mail.outbox.remove(it.outboxId).then(() => loadList(view)); }}>Delete</button></div></div></div>
+                  : view.kind === 'drafts' && selected.length === 1 ? <div className="read"><div className="empty"><div className="big"><Icon name="edit" size={56} style={{ strokeWidth: 1 }} /></div><div><button className="primary" onClick={() => openItem(itemsRef.current.find(i => i.id === selected[0].id))}>Open draft</button> <button onClick={() => { const it = itemsRef.current.find(i => i.id === selected[0].id); if (it?.draftId) mail.drafts.remove(it.draftId).then(() => loadList(view)); else if (it?.remoteDraft) mail.actions.trash([{ accountId: it.accountId, id: it.id }]); }}>Delete</button></div></div></div>
                   : <ReadingPane message={message} thread={thread} loading={msgLoading} prefs={prefs} error={msgError}
                     onRespond={async (m, p) => { try { await mail.actions.respondInvite(m.accountId, m.id, p); toast('Reply sent to the organiser'); const full = await mail.messages.get(m.accountId, m.id); setMessage(cur => cur?.id === m.id ? full : cur); } catch (e) { toast(e.message, true); } }}
-                    onPrint={(m) => mail.messages.print(m.accountId, m.id).catch(e => toast(e.message, true))} onReplyTo={(m, mode) => openCompose(mode, m)} />}
+                    onPrint={(m) => mail.messages.print(m.accountId, m.id).catch(e => toast(e.message, true))} onReplyTo={(m, mode) => openCompose(mode, m)} onPopOut={(m) => mail.messages.openWindow(m.accountId, m.id)} />}
               </div>
             </div>
           )}
@@ -298,7 +313,38 @@ export default function App() {
         <button onClick={() => { mail.sync.now(); }} disabled={!accounts.length || info?.demo}><Icon name="refresh" size={12} /> Sync now</button>
       </div>
       {settingsOpen && <SettingsModal onClose={() => { setSettingsOpen(false); setRuleSeed(null); }} accounts={accounts} labels={labels} ruleSeed={ruleSeed} refreshAccounts={loadMeta} toast={toast} info={info} initialTab={typeof settingsOpen === 'string' ? settingsOpen : undefined} />}
-      {toastMsg && <div className={'toast' + (toastMsg.err ? ' err' : '')}>{toastMsg.m}</div>}
+      {toastMsg && <div className={'toast' + (toastMsg.err ? ' err' : '')}>{toastMsg.m}{toastMsg.undo && <button onClick={() => { const u = toastMsg.undo; setToastMsg(null); u(); }}>Undo</button>}</div>}
+      {sendState && <SendBanner s={sendState} onUndo={async () => { const ok = await mail.send.cancel(sendState.id); setSendState(null); if (ok && sendState.draftId) mail.compose.open({ mode: 'new', accountId: sendState.accountId, draftId: sendState.draftId }); }} />}
+      {labelMenu && <LabelMenu m={labelMenu} labels={labels[labelMenu.accountId] || []} account={accounts.find(a => a.id === labelMenu.accountId)} onClose={() => setLabelMenu(null)} toast={toast} refresh={loadMeta} setView={setView} view={view} />}
+      {shortcuts && <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setShortcuts(false); }}><div className="modal" style={{ width: 640 }}><div className="mh">Keyboard shortcuts<button className="x" onClick={() => setShortcuts(false)}>✕</button></div><div className="mb"><div className="shortcuts">
+        {[['↑ / ↓', 'Move selection'], ['Enter', 'Open draft / send outbox item'], ['Double-click', 'Reply'], ['r / a / f', 'Reply / Reply all / Forward'], ['n', 'New message'], ['o', 'Open message in a window'], ['e', 'Archive'], ['Delete', 'Move to Trash'], ['u', 'Read / unread'], ['s', 'Flag / unflag'], ['p', 'Print'], ['Esc', 'Clear selection / close'], ['?', 'This list'], ['Ctrl+B / I / U / K', 'Bold / italic / underline / link (compose)']].map(([k, d]) => <div key={k}><span>{d}</span><kbd>{k}</kbd></div>)}
+      </div><p className="muted" style={{ marginTop: 12 }}>Search operators: <code>from:</code> <code>to:</code> <code>subject:</code> <code>in:folder</code> <code>is:unread</code> <code>is:flagged</code> <code>has:attachment</code> <code>after:2026-01-01</code> <code>before:2026-02-01</code></p></div></div></div>}
+    </div>
+  );
+}
+
+function SendBanner({ s, onUndo }) {
+  const [, tick] = useState(0);
+  useEffect(() => { const t = setInterval(() => tick(x => x + 1), 500); return () => clearInterval(t); }, []);
+  const left = s.until ? Math.max(0, Math.ceil((s.until - Date.now()) / 1000)) : 0;
+  const pct = s.until ? Math.max(0, Math.min(100, ((s.until - Date.now()) / ((s.until - (s.until - left * 1000)) || 1)) * 100)) : 0;
+  return <div className="sendbar"><span>{s.state === 'sending' ? 'Sending…' : `Sending "${s.subject || '(no subject)'}" in ${left}s`}</span>{s.state === 'pending' && <><span className="bar"><i style={{ width: `${Math.min(100, left * 100 / Math.max(1, Math.round((s.until - Date.now()) / 1000) || 1))}%` }} /></span><button onClick={onUndo}>Undo</button></>}</div>;
+}
+
+const SWATCHES = ['#fb4c2f', '#ffad47', '#fad165', '#16a766', '#43d692', '#4a86e8', '#a479e2', '#f691b3', '#999999', '#000000'];
+function LabelMenu({ m, labels, account, onClose, toast, refresh, setView, view }) {
+  useEffect(() => { const h = () => onClose(); const k = (e) => { if (e.key === 'Escape') onClose(); }; setTimeout(() => document.addEventListener('mousedown', h), 0); document.addEventListener('keydown', k); return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); }; }, [onClose]);
+  const l = m.label; const isImap = account?.kind === 'imap';
+  const run = async (fn, msg) => { try { await fn(); toast(msg); refresh(); } catch (e) { toast(e.message, true); } onClose(); };
+  const leaf = l.name.split('/').pop();
+  return (
+    <div className="ctx menu" style={{ left: Math.min(m.x, window.innerWidth - 240), top: Math.min(m.y, window.innerHeight - 320) }} onMouseDown={e => e.stopPropagation()}>
+      <div className="mhead">{l.name}</div>
+      <MI onClick={() => { const n = prompt('Rename folder:', leaf); if (n && n !== leaf) run(() => mail.labels.rename(m.accountId, l.id, isImap ? n : l.name.split('/').slice(0, -1).concat(n).join('/')), 'Renamed'); }}>Rename…</MI>
+      <MI onClick={() => { const n = prompt(`New subfolder under "${leaf}":`); if (n) run(() => mail.labels.create(m.accountId, l.name + '/' + n), 'Folder created'); }}>New subfolder…</MI>
+      <MI onClick={() => { if (confirm(`Delete folder "${l.name}"? Messages in it are not deleted${isImap ? ' on most servers, but check' : ''}.`)) run(() => mail.labels.remove(m.accountId, l.id).then(() => { if (view.labelId === l.id) setView(HOME); }), 'Folder deleted'); }} danger>Delete folder</MI>
+      <div className="msep" /><div className="mhead">Colour</div>
+      <div className="swatches" onMouseDown={e => e.stopPropagation()}>{SWATCHES.map(c => <span key={c} style={{ background: c }} title={c} onClick={() => run(() => mail.labels.color(m.accountId, l.id, c, '#ffffff'), 'Colour set')} />)}<span style={{ background: 'transparent', border: '2px dashed var(--border)' }} title="No colour" onClick={() => run(() => mail.labels.color(m.accountId, l.id, null, null), 'Colour cleared')} /></div>
     </div>
   );
 }
