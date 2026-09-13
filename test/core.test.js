@@ -6,6 +6,9 @@ const { parsePayload, parseAddresses, buildRaw, b64urlDecode, htmlToText } = req
 const { parseBatchResponse } = require('../electron/gmail/api');
 const { AccountSync, normaliseMessage } = require('../electron/gmail/sync');
 const { Actions } = require('../electron/actions');
+const { GmailProvider } = require('../electron/providers/gmail');
+const { normaliseImap, flagsToLabels } = require('../electron/providers/imap');
+const { parseIcs, buildReply } = require('../electron/calendar');
 
 const b64u = (s) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const msg = (id, labels, extra = {}) => ({ id, threadId: 't' + id, historyId: '10', internalDate: String(1_700_000_000_000 + Number(id.replace(/\D/g, '') || 0) * 1000), sizeEstimate: 1234, snippet: 'snip &amp; ' + id,
@@ -144,7 +147,8 @@ test('actions: optimistic modify + revert on failure, snooze/unsnooze, send thre
   db.replaceLabels(a.id, [{ id: 'INBOX', name: 'INBOX', type: 'system' }]);
   db.upsertMessages(a.id, [g.store.get('m1'), g.store.get('m2')].map(normaliseMessage));
   let changes = 0;
-  const act = new Actions({ db, clients: () => g, onChange: () => changes++ });
+  const prov = new GmailProvider({ db, accountId: a.id, client: g });
+  const act = new Actions({ db, providers: () => prov, onChange: () => changes++ });
   const t = [{ accountId: a.id, id: 'm1' }];
   await act.markRead(t, true);
   assert.equal(db.getMessage(a.id, 'm1').unread, false);
@@ -169,4 +173,65 @@ test('actions: optimistic modify + revert on failure, snooze/unsnooze, send thre
   assert.match(b64urlDecode(sendCall[2].raw).toString(), /From: "?Alex"? <a@x.com>/);
   assert.equal(sent.id, 'sent1');
   assert.equal(db.getMessage(a.id, 'sent1')?.labels[0], 'SENT', 'sent message pulled into local Sent');
+});
+
+test('threads: assignThreads links replies via In-Reply-To/References in either arrival order + listThreads groups', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const mk = (id, mid, inReplyTo, refs, date, labels = ['INBOX']) => ({ id, threadId: null, internalDate: date, size: 1, snippet: '', subject: 's', fromName: '', fromEmail: 'x@y', to: [], cc: [], labels, messageIdHdr: mid, inReplyTo, references: refs });
+  // reply arrives FIRST (newest-first sync), then the original
+  db.upsertMessages(a.id, [mk('r1', '<r1@x>', '<o@x>', '<o@x>', 2000)]); db.assignThreads(a.id, ['r1']);
+  db.upsertMessages(a.id, [mk('o', '<o@x>', null, null, 1000)]); db.assignThreads(a.id, ['o']);
+  db.upsertMessages(a.id, [mk('r2', '<r2@x>', '<r1@x>', '<o@x> <r1@x>', 3000, ['SENT'])]); db.assignThreads(a.id, ['r2']);
+  const t = new Set(['r1', 'o', 'r2'].map(id => db.getMessage(a.id, id).threadId));
+  assert.equal(t.size, 1, 'all three share one thread id');
+  db.upsertMessages(a.id, [mk('solo', '<solo@x>', null, null, 4000)]); db.assignThreads(a.id, ['solo']);
+  const rows = db.listThreads({ kind: 'all', accountId: a.id });
+  assert.equal(rows.length, 2);
+  assert.equal(rows[1].threadCount, 3); assert.equal(rows[1].id, 'r2', 'latest message represents the thread');
+  assert.equal(db.countThreads({ kind: 'label', accountId: a.id, labelId: 'INBOX' }), 2);
+  assert.equal(db.threadMessages(a.id, rows[1].threadId).length, 3);
+});
+
+test('imap: envelope → row, flags → labels', () => {
+  const m = { uid: 42, flags: new Set(['\\Seen', '\\Flagged']), size: 999, internalDate: new Date('2026-09-01T10:00:00Z'),
+    envelope: { subject: 'Hi', from: [{ name: 'Ann', address: 'ANN@x.com' }], to: [{ address: 'b@y' }], messageId: '<m@x>', inReplyTo: '<p@x>', date: new Date() },
+    bodyStructure: { type: 'multipart/mixed', childNodes: [{ type: 'text/plain' }, { type: 'application/pdf', disposition: 'attachment', dispositionParameters: { filename: 'a.pdf' } }] },
+    headers: Buffer.from('References: <p@x>\r\nReply-To: r@x\r\n') };
+  const r = normaliseImap(m, { path: 'INBOX', labelId: 'INBOX' });
+  assert.equal(r.id, 'INBOX::42'); assert.equal(r.fromEmail, 'ann@x.com'); assert.equal(r.hasAttachment, true); assert.equal(r.references, '<p@x>'); assert.equal(r.replyTo, 'r@x');
+  assert.deepEqual(r.labels, ['INBOX', 'STARRED']);
+  assert.deepEqual(flagsToLabels(new Set(), 'Work'), ['Work', 'UNREAD']);
+});
+
+test('calendar: parse invite + build reply', () => {
+  const ics = 'BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:abc\r\nSUMMARY:Team\\, sync\r\nDTSTART;TZID=Europe/London:20260920T100000\r\nDTEND;TZID=Europe/London:20260920T110000\r\nLOCATION:Room 1\r\nORGANIZER;CN=Sam:mailto:sam@x.com\r\nATTENDEE;CN=Alex;PARTSTAT=NEEDS-ACTION:mailto:alex@x.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n';
+  const ev = parseIcs(ics);
+  assert.equal(ev.summary, 'Team, sync'); assert.equal(ev.method, 'REQUEST'); assert.equal(ev.organizer.email, 'sam@x.com'); assert.equal(ev.attendees[0].name, 'Alex');
+  assert.equal(new Date(ev.start.ts).getHours(), 10);
+  const reply = buildReply(ev, { email: 'alex@x.com', name: 'Alex', partstat: 'ACCEPTED' });
+  assert.match(reply, /METHOD:REPLY/); assert.match(reply, /ATTENDEE;PARTSTAT=ACCEPTED;CN=Alex:mailto:alex@x.com/); assert.match(reply, /UID:abc/);
+  assert.equal(parseIcs('nothing here'), null);
+});
+
+test('drafts: save/update/list/delete + remote message dedupe', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const d = db.saveDraft({ accountId: a.id, to: 'x@y', subject: 'hi', bodyHtml: '<p>hi</p>', bodyText: 'hi' });
+  assert.ok(d.id); assert.equal(db.listDrafts().length, 1);
+  const d2 = db.saveDraft({ ...d, subject: 'hello' });
+  assert.equal(d2.id, d.id); assert.equal(db.getDraft(d.id).subject, 'hello');
+  db.setDraftRemote(d.id, 'rd1', 'msg9');
+  assert.ok(db.draftRemoteMessageIds(a.id).has('msg9'));
+  db.deleteDraft(d.id); assert.equal(db.listDrafts().length, 0);
+});
+
+test('search filters narrow a view', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  db.upsertMessages(a.id, [msg('m1', ['INBOX', 'UNREAD']), msg('m2', ['INBOX'], { ct: 'multipart/mixed' })].map(normaliseMessage));
+  assert.equal(db.countMessages({ kind: 'all-inboxes', filters: { unread: true } }), 1);
+  assert.equal(db.countMessages({ kind: 'all-inboxes', filters: { hasAttachment: true } }), 1);
+  assert.equal(db.countMessages({ kind: 'all-inboxes', filters: { from: 'ann@example' } }), 2);
+  assert.equal(db.countMessages({ kind: 'all-inboxes', filters: { from: 'nobody' } }), 0);
 });

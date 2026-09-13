@@ -1,7 +1,7 @@
 {
   "name": "tomail",
   "productName": "Tomail",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Tomail — a fast desktop email client for Gmail and Google Workspace",
   "private": true,
   "main": "electron/main.js",
@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
+    "imapflow": "^2.0.2",
+    "mailparser": "^3.9.26",
     "nodemailer": "^10.0.9"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 # Tomail
 
-A fast, keyboard-friendly desktop email client for **Gmail and Google Workspace**, for Windows, macOS and Linux.
+A fast, keyboard-friendly desktop email client for **Gmail, Google Workspace and any IMAP mailbox** (Outlook, Yahoo, iCloud, Fastmail, your own domain…), for Windows, macOS and Linux.
 
 Three-pane layout: folders and labels on the left (favourites, per-account system folders, nested labels),
 a message list with Primary / Promotions / Social tabs grouped by day, and a reading pane below.
@@ -8,7 +8,14 @@ Every account is mirrored into a local database, so folder views, unread counts 
 instant even for a 60,000-message inbox — and it still works when you're offline.
 
 ## Features
-- Multiple Google accounts with a merged **All Inboxes** view
+- Google accounts (sign in with your browser) and IMAP/SMTP accounts (server settings looked up automatically), any mix, with a merged **All Inboxes** view
+- **Conversation view** (toggle in the list header): one row per thread, messages stacked in the reading pane
+- **Drafts** auto-save as you type and are mirrored to the server's Drafts folder, so you can finish them elsewhere
+- **Rich-text compose**: bold/italic/underline, lists, quotes, links, pasted or inserted images; per-account signatures
+- **Calendar invites** show as a card with Accept / Maybe / Decline (sends the reply to the organiser)
+- **Notifications** for new inbox mail (click to open) and an unread badge on the dock / taskbar icon
+- **Dark mode** (system, light or dark), printing, search filters (from, to, dates, account, folder, unread, flagged, attachments)
+- Trash and Junk views offer Restore, Delete forever and Empty folder (Gmail needs "Grant full access" for permanent delete)
 - Instant local search (subject, sender, recipients, cached bodies) plus **Deep search** that runs Gmail's own
   search — full Gmail syntax, including inside attachments
 - Read / unread, flag, archive, delete, move to folder, junk / not junk — all applied instantly and synced to Gmail
@@ -17,6 +24,8 @@ instant even for a 60,000-message inbox — and it still works when you're offli
 - Remote images blocked by default (per-message "Load images"), HTML rendered in a sandbox, links open in your browser
 - Keyboard: ↑/↓ move · Delete = trash · e = archive · u = read/unread · s = flag · r / a / f = reply / reply all / forward · n = new
 - Automatic updates from GitHub Releases
+
+IMAP accounts get the same features. Folders appear as labels, flags map to read/flagged, and moving between folders is what archive, junk, snooze and "move to" do underneath. Message ids are `folder::uid`, and a move re-keys the local row so cached bodies survive.
 
 Tomail asks Google for the `gmail.modify` scope only: read, label, archive, trash and send.
 It never requests permanent-delete access, and your Google password never passes through the app.
@@ -87,8 +96,9 @@ test/                   unit tests for db, mime, batch parsing, sync and actions
 - Move follows Gmail semantics: add the target label, drop the label of the folder you were viewing.
 
 ## Roadmap
-Drafts, threaded conversation view, rich-text compose, empty trash, push notifications (Pub/Sub) instead of polling,
-IMAP/SMTP for non-Google accounts, code signing.
+Push notifications (Gmail Pub/Sub, IMAP IDLE) instead of polling, cross-device snooze, rules/filters, contacts autocomplete, code signing.
+
+Microsoft 365 / Outlook.com note: Microsoft has retired password sign-in for IMAP on most accounts, so those need an app password (where the tenant allows it) or OAuth support, which Tomail doesn't have yet.
 
 ## License
 MIT — see [LICENSE](LICENSE).

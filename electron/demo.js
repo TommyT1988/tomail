@@ -51,7 +51,15 @@ function seedDemo(db) {
       labels: [...labels, ...(unread && !labels.includes('UNREAD') ? ['UNREAD'] : [])], messageIdHdr: `<demo${i + 1}@example>`,
     };
   });
+  msgs.push({ id: 'demoinv', threadId: 'thinv', historyId: '1', internalDate: t(9, 5), size: 8000, snippet: 'Invitation: Supplier review @ Thu 10:00', subject: 'Invitation: Supplier review',
+    fromName: 'Sam Wood', fromEmail: 'sam@example.com', to: [{ name: 'Alex', email: 'alex@example.com' }], cc: [], hasAttachment: false, labels: ['INBOX', 'UNREAD'], messageIdHdr: '<inv@example>' });
+  for (let i = 0; i < 3; i++) msgs.push({ id: 'demothr' + i, threadId: 'ththr', historyId: '1', internalDate: t(14 + i, 10, 2 - i), size: 3000 + i, snippet: 'Re: Quote for 20 laptops', subject: (i ? 'Re: ' : '') + 'Quote for 20 laptops',
+    fromName: i % 2 ? 'Alex' : 'Jordan Lee', fromEmail: i % 2 ? 'alex@example.com' : 'jordan@example.org', to: [{ name: '', email: i % 2 ? 'jordan@example.org' : 'alex@example.com' }], cc: [], hasAttachment: false,
+    labels: i % 2 ? ['SENT'] : ['INBOX'], messageIdHdr: `<thr${i}@example>`, inReplyTo: i ? `<thr${i - 1}@example>` : null });
   db.upsertMessages(a1.id, msgs);
+  const inv = new Date(); inv.setDate(inv.getDate() + 3); inv.setHours(10, 0, 0, 0);
+  db.setCalendar(a1.id, 'demoinv', { uid: 'inv-1', summary: 'Supplier review', location: 'Meeting room 2', start: { ts: inv.getTime(), allDay: false }, end: { ts: inv.getTime() + 3600000, allDay: false },
+    organizer: { name: 'Sam Wood', email: 'sam@example.com' }, attendees: [{ name: 'Alex', email: 'alex@example.com', partstat: 'NEEDS-ACTION' }], method: 'REQUEST', sequence: 0 });
   for (const m of msgs) {
     const text = `Hello Alex,\n\nThis is the body of "${m.subject}".\n\nThis mailbox is running in demo mode — nothing here touches Google.\n\nKind regards,\n${m.fromName}`;
     db.setBody(a1.id, m.id, { text, html: textToHtml(text) + '<p><a href="https://example.com">example.com</a></p>',
@@ -64,6 +72,24 @@ function seedDemo(db) {
   db.updateAccount(a2.id, { initial_done: 1, history_id: '1', last_sync_at: Date.now() - 5 * 60000 });
 }
 
+/** A provider that accepts every write and serves no reads (bodies are pre-seeded). */
+class DemoProvider {
+  constructor() { this.kind = 'gmail'; this.canDeleteForever = true; }
+  cancel() {}
+  async syncLabels() { return []; }
+  async sync() { return { newInbox: [] }; }
+  async modify() {}
+  async fetchFull() { throw new Error('Demo mode: no network'); }
+  async getAttachment() { return Buffer.from('demo attachment'); }
+  async send() { return { id: 'sent_' + Date.now() }; }
+  async search() { return []; }
+  async createLabel(name) { return { id: 'Label_demo_' + Date.now(), name, type: 'user' }; }
+  async saveDraft() { return { id: 'demo-draft', messageId: null }; }
+  async deleteDraft() {}
+  async draftIdForMessage() { return null; }
+  async deleteForever() {}
+  async emptyFolder() { return 0; }
+}
 /** A client that accepts every write and serves no reads. */
 class DemoClient {
   async get(path) { if (path === '/profile') return { emailAddress: 'demo@example.com', historyId: '1' }; if (path === '/labels') return { labels: [] }; if (path === '/history') return { history: [], historyId: '1' }; if (path === '/messages') return { messages: [] }; throw new Error('Demo mode: no network'); }
@@ -71,4 +97,4 @@ class DemoClient {
   async batchGet() { return []; }
   async request() { return null; }
 }
-module.exports = { seedDemo, DemoClient };
+module.exports = { seedDemo, DemoClient, DemoProvider };

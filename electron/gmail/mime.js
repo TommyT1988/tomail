@@ -32,7 +32,7 @@ function decodeMimeWords(s) {
  * Small inline bodies come with `data` (base64url) inline; real attachments have attachmentId for attachments.get.
  */
 function parsePayload(payload) {
-  const res = { text: '', html: '', attachments: [] };
+  const res = { text: '', html: '', attachments: [], calendar: null };
   const texts = [], htmls = [];
   walk(payload, false);
   res.text = texts.join('\n');
@@ -62,6 +62,7 @@ function parsePayload(payload) {
       return;
     }
     const body = part.body?.data ? b64urlDecode(part.body.data).toString('utf8') : '';
+    if (mime === 'text/calendar') { res.calendar = body; return; }
     if (mime === 'text/plain') texts.push(body);
     else if (mime === 'text/html') htmls.push(body);
     else if (mime.startsWith('text/')) texts.push(body);
@@ -92,7 +93,7 @@ async function buildRaw(opts) {
   const mail = {
     from: opts.from, to: opts.to, cc: opts.cc || undefined, bcc: opts.bcc || undefined, subject: opts.subject || '',
     text: opts.text || '', html: opts.html || undefined, attachments: opts.attachments || [],
-    inReplyTo: opts.inReplyTo || undefined, references: opts.references || undefined,
+    inReplyTo: opts.inReplyTo || undefined, references: opts.references || undefined, icalEvent: opts.icalEvent || undefined,
   };
   const buf = await new MailComposer(mail).compile().build();
   return b64urlEncode(buf);

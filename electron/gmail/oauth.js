@@ -9,6 +9,8 @@ const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 // gmail.modify = every read/write op except permanent (bypass-trash) deletion. Covers send.
 const SCOPES = ['https://www.googleapis.com/auth/gmail.modify'];
+// Opt-in: full access additionally allows permanent delete / empty trash.
+const SCOPES_FULL = ['https://mail.google.com/'];
 
 function b64url(buf) { return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 
@@ -16,7 +18,7 @@ function b64url(buf) { return buf.toString('base64').replace(/\+/g, '-').replace
  * Runs the interactive flow. `openUrl(url)` is called once with the consent URL.
  * Resolves with { access_token, refresh_token, expires_at, scope }.
  */
-function authorize({ clientId, clientSecret, openUrl, timeoutMs = 5 * 60 * 1000, loginHint }) {
+function authorize({ clientId, clientSecret, openUrl, timeoutMs = 5 * 60 * 1000, loginHint, scopes = SCOPES }) {
   return new Promise((resolve, reject) => {
     const verifier = b64url(crypto.randomBytes(48));
     const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
@@ -43,7 +45,7 @@ function authorize({ clientId, clientSecret, openUrl, timeoutMs = 5 * 60 * 1000,
       redirectUri = `http://127.0.0.1:${server.address().port}/oauth2callback`;
       const u = new URL(AUTH_URL);
       u.search = new URLSearchParams({
-        client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: SCOPES.join(' '),
+        client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: scopes.join(' '),
         access_type: 'offline', prompt: 'consent select_account', code_challenge: challenge, code_challenge_method: 'S256',
         state, ...(loginHint ? { login_hint: loginHint } : {}),
       }).toString();
@@ -79,4 +81,4 @@ function page(title, msg) {
   return `<!doctype html><meta charset=utf-8><title>${title}</title><body style="font-family:system-ui;padding:40px;color:#222"><h2>${title}</h2><p>${msg}</p>`;
 }
 
-module.exports = { authorize, refresh, SCOPES };
+module.exports = { authorize, refresh, SCOPES, SCOPES_FULL };

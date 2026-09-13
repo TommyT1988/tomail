@@ -2,17 +2,13 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { CATEGORIES, dayGroup, fmtAddr, fmtSize, fmtTime, keyOf } from '../util.js';
 import Icon from './Icons.jsx';
 
-export default function MessageList({ items, total, loading, view, setView, selected, onSelect, onOpen, onLoadMore, hasMore, accounts, labelsById, showCategories, onKey }) {
+export default function MessageList({ items, total, loading, view, setView, selected, onSelect, onOpen, onLoadMore, hasMore, accounts, labelsById, showCategories, onKey, threaded, setThreaded }) {
   const ref = useRef(null);
   const selSet = useMemo(() => new Set(selected.map(keyOf)), [selected]);
   const multiAccount = accounts.length > 1;
   const groups = useMemo(() => {
     const out = []; let cur = null;
-    for (const m of items) {
-      const g = dayGroup(m.date);
-      if (!cur || cur.name !== g) { cur = { name: g, items: [] }; out.push(cur); }
-      cur.items.push(m);
-    }
+    for (const m of items) { const g = dayGroup(m.date); if (!cur || cur.name !== g) { cur = { name: g, items: [] }; out.push(cur); } cur.items.push(m); }
     return out;
   }, [items]);
   useEffect(() => {
@@ -20,19 +16,16 @@ export default function MessageList({ items, total, loading, view, setView, sele
     const h = () => { if (hasMore && !loading && el.scrollTop + el.clientHeight > el.scrollHeight - 300) onLoadMore(); };
     el.addEventListener('scroll', h); return () => el.removeEventListener('scroll', h);
   }, [hasMore, loading, onLoadMore]);
-  // keep the focused/selected row in view
   useEffect(() => {
     if (!selected.length) return;
     const k = keyOf(selected[selected.length - 1]);
-    const el = ref.current?.querySelector(`[data-k="${CSS.escape(k)}"]`);
-    el?.scrollIntoView({ block: 'nearest' });
+    ref.current?.querySelector(`[data-k="${CSS.escape(k)}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [selected]);
-
   const otherLabels = (m) => {
-    const skip = new Set(['INBOX', 'UNREAD', 'STARRED', 'IMPORTANT', 'SENT', 'DRAFT', 'TRASH', 'SPAM', view.labelId]);
+    const skip = new Set(['INBOX', 'UNREAD', 'STARRED', 'IMPORTANT', 'SENT', 'DRAFT', 'TRASH', 'SPAM', 'ARCHIVE', view.labelId]);
     return m.labels.filter(l => !skip.has(l) && !l.startsWith('CATEGORY_')).map(l => labelsById[m.accountId]?.[l]?.name?.split('/').pop()).filter(Boolean);
   };
-
+  const isDrafts = view.kind === 'drafts';
   return (
     <>
       <div className="tabs">
@@ -40,23 +33,24 @@ export default function MessageList({ items, total, loading, view, setView, sele
           <button key={c.id} className={'tab' + ((view.category || 'primary') === c.id ? ' active' : '')} onClick={() => setView({ ...view, category: c.id })}>{c.name}</button>
         )) : <span className="tab active" style={{ cursor: 'default' }}>{viewTitle(view, labelsById, accounts)}</span>}
         <span className="spacer" />
-        <span className="count">{loading && !items.length ? 'Loading…' : `${(total ?? items.length).toLocaleString()} message${total === 1 ? '' : 's'}`}</span>
+        {!isDrafts && <button className="tab" title="Group messages by conversation" onClick={() => setThreaded(!threaded)} style={{ padding: '4px 8px' }}><Icon name="layers" size={12} /> {threaded ? 'Conversations: on' : 'Conversations: off'}</button>}
+        <span className="count">{loading && !items.length ? 'Loading…' : `${(total ?? items.length).toLocaleString()} ${isDrafts ? 'draft' : threaded ? 'conversation' : 'message'}${total === 1 ? '' : 's'}`}</span>
       </div>
-      <div className="cols"><span /><span>From</span><span>Subject</span><span style={{ textAlign: 'right' }}>Received</span><span style={{ textAlign: 'right' }}>Size</span></div>
+      <div className="cols"><span /><span>{isDrafts ? 'To' : 'From'}</span><span>Subject</span><span style={{ textAlign: 'right' }}>{isDrafts ? 'Saved' : 'Received'}</span><span style={{ textAlign: 'right' }}>Size</span></div>
       <div className="rows" ref={ref} tabIndex={0} onKeyDown={onKey}>
-        {!items.length && !loading && <div className="empty"><div className="big">▭</div><div>No messages here</div></div>}
+        {!items.length && !loading && <div className="empty"><div className="big">▭</div><div>{isDrafts ? 'No drafts' : 'No messages here'}</div></div>}
         {groups.map(g => (
           <React.Fragment key={g.name}>
             <div className="grp">{g.name}</div>
             {g.items.map(m => {
               const k = keyOf(m);
-              const labs = otherLabels(m);
+              const labs = isDrafts ? [] : otherLabels(m);
               return (
-                <div key={k} data-k={k} className={'row' + (m.unread ? ' unread' : '') + (selSet.has(k) ? ' sel' : '')}
+                <div key={k} data-k={k} className={'row' + (m.unread || (m.threadUnread > 0) ? ' unread' : '') + (selSet.has(k) ? ' sel' : '') + (m.isDraft ? ' draft' : '')}
                   onMouseDown={(e) => { if (e.button === 0) onSelect(m, e); }} onDoubleClick={() => onOpen(m)}>
-                  <span>{m.unread && <span className="dot" />}</span>
-                  <span className="from" title={m.fromEmail}>{fmtAddr({ name: m.fromName, email: m.fromEmail }) || m.fromEmail}{multiAccount && <span className="acct">{accounts.find(a => a.id === m.accountId)?.email?.split('@')[0]}</span>}</span>
-                  <span className="subj" title={m.snippet}>{m.starred && <span className="star"><Icon name="star" size={12} fill /></span>}{m.subject || '(no subject)'}{m.hasAttachment && <span className="clip"><Icon name="clip" size={12} /></span>}{labs.map(l => <span key={l} className="lab">{l}</span>)}</span>
+                  <span>{(m.unread || m.threadUnread > 0) && <span className="dot" />}</span>
+                  <span className="from" title={m.fromEmail}>{m.isDraft ? <span>Draft{m.toText ? ' · to ' + m.toText : ''}</span> : (fmtAddr({ name: m.fromName, email: m.fromEmail }) || m.fromEmail)}{multiAccount && <span className="acct">{accounts.find(a => a.id === m.accountId)?.email?.split('@')[0]}</span>}</span>
+                  <span className="subj" title={m.snippet}>{m.answered && <span className="reply-ico"><Icon name="reply" size={11} /></span>}{m.starred && <span className="star"><Icon name="star" size={12} fill /></span>}{m.subject || '(no subject)'}{m.threadCount > 1 && <span className="tcount">{m.threadCount}</span>}{m.hasAttachment && <span className="clip"><Icon name="clip" size={12} /></span>}{labs.map(l => <span key={l} className="lab">{l}</span>)}</span>
                   <span className="when">{fmtTime(m.date)}</span>
                   <span className="size">{fmtSize(m.size)}</span>
                 </div>
@@ -69,20 +63,11 @@ export default function MessageList({ items, total, loading, view, setView, sele
     </>
   );
 }
-
 export function viewTitle(view, labelsById, accounts) {
   switch (view.kind) {
-    case 'all-inboxes': return 'All Inboxes';
-    case 'unread': return 'Unread';
-    case 'starred': return 'Flagged';
-    case 'snoozed': return 'Snoozed';
-    case 'all': return 'All Mail';
-    case 'search': return `Search: ${view.q}`;
-    case 'ids': return `Deep search: ${view.q}`;
-    case 'label': {
-      const sys = { INBOX: 'Inbox', SENT: 'Sent', TRASH: 'Trash', DRAFT: 'Drafts', SPAM: 'Junk Email' };
-      return sys[view.labelId] || labelsById[view.accountId]?.[view.labelId]?.name || view.labelId;
-    }
+    case 'all-inboxes': return 'All Inboxes'; case 'unread': return 'Unread'; case 'starred': return 'Flagged'; case 'snoozed': return 'Snoozed';
+    case 'all': return 'All Mail'; case 'drafts': return 'Drafts'; case 'search': return `Search: ${view.q}`; case 'ids': return `Deep search: ${view.q}`;
+    case 'label': { const sys = { INBOX: 'Inbox', SENT: 'Sent', TRASH: 'Trash', DRAFT: 'Drafts', SPAM: 'Junk Email', ARCHIVE: 'Archive' }; return sys[view.labelId] || labelsById[view.accountId]?.[view.labelId]?.name || view.labelId; }
     default: return '';
   }
 }

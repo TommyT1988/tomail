@@ -85,3 +85,26 @@ export function snoozePresets() {
   ];
 }
 export function textToQuoted(t) { return String(t || '').split('\n').map(l => '> ' + l).join('\n'); }
+export function htmlToText(html) {
+  if (!html) return '';
+  const d = document.createElement('div');
+  d.innerHTML = html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '$&\n');
+  return (d.textContent || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+export function isDark() { const t = document.documentElement.dataset.theme; return t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches); }
+export function fmtRange(ev) {
+  if (!ev?.start) return '';
+  const s = new Date(ev.start.ts), e = ev.end ? new Date(ev.end.ts) : null;
+  if (ev.start.allDay) return s.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + (e && e - s > 86400000 ? ' → ' + new Date(e - 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' }) : '');
+  const day = s.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const t = (d) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return `${day}, ${t(s)}${e ? (sameDay(s, e) ? ' – ' + t(e) : ' → ' + e.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : ''}`;
+}
+export function gmailQuery(q, f = {}) {
+  const parts = [q || ''];
+  if (f.from) parts.push(`from:${f.from}`); if (f.to) parts.push(`to:${f.to}`);
+  if (f.unread) parts.push('is:unread'); if (f.starred) parts.push('is:starred'); if (f.hasAttachment) parts.push('has:attachment');
+  const d = (ts) => { const x = new Date(Number(ts)); return `${x.getFullYear()}/${x.getMonth() + 1}/${x.getDate()}`; };
+  if (f.after) parts.push(`after:${d(f.after)}`); if (f.before) parts.push(`before:${d(f.before)}`);
+  return parts.filter(Boolean).join(' ');
+}
