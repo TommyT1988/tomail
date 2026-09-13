@@ -1,8 +1,8 @@
 {
-  "name": "tab-mail",
-  "productName": "Mail",
+  "name": "tomail",
+  "productName": "Tomail",
   "version": "0.1.0",
-  "description": "TAB Retail desktop email client for Google Workspace",
+  "description": "Tomail — a fast desktop email client for Gmail and Google Workspace",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -10,9 +10,12 @@
     "build": "vite build",
     "start": "npm run build && electron .",
     "test": "node --test",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder --publish never",
+    "oauth:client": "node scripts/write-oauth-client.mjs",
+    "release": "npm run build && electron-builder --publish always"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "nodemailer": "^10.0.9"
   },
   "devDependencies": {
@@ -30,7 +33,7 @@
     "electron-winstaller@5.4.0": true
   },
   "build": {
-    "appId": "uk.co.tab-retail.mail",
+    "appId": "app.tomail.desktop",
     "productName": "Mail",
     "directories": {
       "output": "release"
@@ -38,7 +41,8 @@
     "files": [
       "electron/**",
       "dist/**",
-      "package.json"
+      "package.json",
+      "!electron/**/*.test.js"
     ],
     "win": {
       "target": [
@@ -50,16 +54,33 @@
         "AppImage",
         "deb"
       ],
-      "category": "Network"
+      "category": "Network",
+      "maintainer": "TommyT1988"
     },
     "mac": {
       "target": [
-        "dmg"
-      ]
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "TommyT1988",
+        "repo": "tomail"
+      }
+    ]
+  },
+  "license": "MIT",
+  "author": "Tomas (TommyT1988)",
+  "homepage": "https://github.com/TommyT1988/tomail",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TommyT1988/tomail.git"
   }
 }

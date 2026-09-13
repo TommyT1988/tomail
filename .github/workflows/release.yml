@@ -1,0 +1,26 @@
+name: Release
+# Tag a commit `vX.Y.Z` (matching package.json version) to build installers for
+# Windows / macOS / Linux and attach them to a GitHub Release. Auto-update reads
+# the same release. Requires repo secrets TOMAIL_GOOGLE_CLIENT_ID + _SECRET.
+on: { push: { tags: ['v*'] } }
+permissions: { contents: write }
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix: { os: [ubuntu-latest, windows-latest, macos-latest] }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run oauth:client
+        env:
+          CI: 'true'
+          TOMAIL_GOOGLE_CLIENT_ID: ${{ secrets.TOMAIL_GOOGLE_CLIENT_ID }}
+          TOMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.TOMAIL_GOOGLE_CLIENT_SECRET }}
+      - run: npm test
+      - run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -4,12 +4,11 @@ const { textToHtml } = require('./gmail/mime');
 
 function seedDemo(db) {
   const a1 = db.addAccount({ email: 'alex@example.com', displayName: 'Alex', tokenEnc: Buffer.from('plain:{}') });
-  const a2 = db.addAccount({ email: 'shop@example.com', displayName: 'Sales', tokenEnc: Buffer.from('plain:{}') });
+  const a2 = db.addAccount({ email: 'shop@example.com', displayName: 'Shop', tokenEnc: Buffer.from('plain:{}') });
   const sys = ['INBOX', 'SENT', 'DRAFT', 'TRASH', 'SPAM', 'STARRED', 'UNREAD', 'IMPORTANT', 'CATEGORY_PERSONAL', 'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS']
     .map(id => ({ id, name: id, type: 'system' }));
   const user = ['Customers', 'Customers/Amazon', 'Customers/eBay', 'Couriers', 'Family', 'Family/Sam', 'Finance', 'Finance/Invoices', 'Finance/PayPal',
-    'Newsletters', 'Projects', 'Projects/House', 'Projects/Website', 'Receipts', 'Returns', 'Travel'
-    'Receipts']
+    'Newsletters', 'Projects', 'Projects/House', 'Projects/Website', 'Receipts', 'Returns', 'Travel']
     .map((name, i) => ({ id: 'Label_' + (i + 1), name, type: 'user' }));
   db.replaceLabels(a1.id, [...sys, ...user]);
   db.replaceLabels(a2.id, sys);

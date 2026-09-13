@@ -29,7 +29,7 @@ const api = {
   compose: { pickFiles: () => call('compose:pickFiles') },
   sync: { now: (accountId) => call('sync:now', accountId), status: () => call('sync:status') },
   shell: { openExternal: (url) => call('shell:openExternal', url) },
-  app: { info: () => call('app:info') },
+  app: { info: () => call('app:info'), installUpdate: () => call('app:installUpdate') },
   on: (event, cb) => { const h = (_e, payload) => cb(payload); ipcRenderer.on(event, h); return () => ipcRenderer.removeListener(event, h); },
 };
 contextBridge.exposeInMainWorld('mail', api);

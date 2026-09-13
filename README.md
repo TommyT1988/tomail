@@ -1,75 +1,94 @@
-# Mail — TAB Retail desktop email client
+# Tomail
 
-Electron desktop client for Google Workspace / Gmail accounts, modelled on the
-three-pane layout in the design screenshot: folder tree (favourites, per-account
-system folders, nested labels), message list with Primary/Promotions/Social tabs
-and day grouping, reading pane below, compose in a modal.
+A fast, keyboard-friendly desktop email client for **Gmail and Google Workspace**, for Windows, macOS and Linux.
 
-Every account's mailbox is mirrored into a local SQLite database (bundled with
-Electron's Node — no native modules), so folder views, counts and search are
-instant even for a 60k-message inbox. Gmail stays the source of truth: read /
-flag / archive / delete / move / snooze are Gmail label changes, applied
-optimistically and reverted if Google rejects them.
+Three-pane layout: folders and labels on the left (favourites, per-account system folders, nested labels),
+a message list with Primary / Promotions / Social tabs grouped by day, and a reading pane below.
+Every account is mirrored into a local database, so folder views, unread counts and search are
+instant even for a 60,000-message inbox — and it still works when you're offline.
 
-## Stack
-- Electron 44 (Node 24) · React 19 + Vite 8 · `node:sqlite` with FTS5 · nodemailer (MIME building only)
-- No UI component libraries. All icons are inline SVG.
+## Features
+- Multiple Google accounts with a merged **All Inboxes** view
+- Instant local search (subject, sender, recipients, cached bodies) plus **Deep search** that runs Gmail's own
+  search — full Gmail syntax, including inside attachments
+- Read / unread, flag, archive, delete, move to folder, junk / not junk — all applied instantly and synced to Gmail
+- **Snooze** (later today, tomorrow, weekend, next week, or pick a time)
+- Compose, reply, reply all, forward (with the original attachments), file attachments, signature
+- Remote images blocked by default (per-message "Load images"), HTML rendered in a sandbox, links open in your browser
+- Keyboard: ↑/↓ move · Delete = trash · e = archive · u = read/unread · s = flag · r / a / f = reply / reply all / forward · n = new
+- Automatic updates from GitHub Releases
 
-## Layout
+Tomail asks Google for the `gmail.modify` scope only: read, label, archive, trash and send.
+It never requests permanent-delete access, and your Google password never passes through the app.
+Sign-in tokens are stored encrypted with your operating system's keychain.
+
+## Install
+Download the installer for your platform from the [Releases](https://github.com/TommyT1988/tomail/releases) page:
+`Tomail-Setup-x.y.z.exe` (Windows), `Tomail-x.y.z.dmg` (macOS), `Tomail-x.y.z.AppImage` or `.deb` (Linux).
+
+> Builds are not code-signed yet. Windows SmartScreen and macOS Gatekeeper will warn on first launch
+> ("More info → Run anyway" / right-click → Open).
+
+Then click **Sign in with Google**. The newest mail appears within seconds; the rest of the mailbox
+downloads in the background (roughly 50 messages per second) and resumes if you close the app.
+
+## Build it yourself
 ```
-electron/main.js        app lifecycle, window, IPC, sync scheduler, snooze timer
-electron/preload.cjs    contextBridge → window.mail.*  (renderer never touches network/db)
-electron/db.js          SQLite schema + queries + FTS (accounts, labels, messages, message_labels)
-electron/accounts.js    token storage (safeStorage-encrypted) + GmailClient factory
-electron/actions.js     every user action (mark/star/archive/trash/move/snooze/send/deep search/body fetch)
-electron/gmail/oauth.js PKCE loopback OAuth for a Google "Desktop app" client
-electron/gmail/api.js   Gmail REST client: refresh on 401, backoff on 429/5xx, multipart batch GETs
-electron/gmail/sync.js  resumable initial sync (newest first, metadata only) + history.list increments
-electron/gmail/mime.js  payload → text/html/attachments; outgoing → RFC 2822 raw
-electron/demo.js        MAIL_DEMO=1 sample mailbox (no Google needed)
-src/                    React renderer (App, Sidebar, MessageList, ReadingPane, Compose, SettingsModal, Menus, Icons)
-test/                   node:test unit tests (db, mime, batch parser, sync, actions) — `npm test`
+git clone https://github.com/TommyT1988/tomail && cd tomail
+npm install
+npm run dev              # Vite dev server + Electron, live reload
+npm start                # build the renderer and run Electron against it
+MAIL_DEMO=1 npm start    # sample mailbox, no Google connection
+npm test                 # unit tests (node:test)
+npm run dist             # installers into release/
 ```
 
-## First run — Google API credentials (one-time, ~5 minutes)
-Mail talks to Gmail directly, so it needs its own OAuth client:
-1. https://console.cloud.google.com → create a project (e.g. "TAB Mail") → **APIs & Services → Library → Gmail API → Enable**.
-2. **OAuth consent screen**: User type **Internal** (Workspace only, no Google verification needed). App name "Mail", your address as contact.
-3. **Credentials → Create credentials → OAuth client ID → Desktop app**. Copy the client ID + secret.
-4. In the app: **Settings → Google API** → paste both → Save. Then **Settings → Accounts → Add Google account** (a browser tab opens for sign-in; repeat per mailbox).
-5. If the Workspace admin has locked down third-party apps: Admin console → Security → API controls → allow this client ID.
+**Google sign-in for your own build.** Releases carry a built-in Google OAuth client. Your own build won't, so either:
+- create a *Desktop app* OAuth client in [Google Cloud Console](https://console.cloud.google.com/apis/library/gmail.googleapis.com)
+  (enable the Gmail API; consent screen **Internal** for Workspace, or External with yourself as a test user) and export
+  `TOMAIL_GOOGLE_CLIENT_ID` / `TOMAIL_GOOGLE_CLIENT_SECRET` before `npm run oauth:client`, or
+- paste the same values in the app under **Settings → Advanced**.
 
-Scope requested: `gmail.modify` only (read, label, archive, trash, send). Permanent delete is never requested.
-Tokens are stored encrypted with the OS keychain (Electron `safeStorage`) under the app's data folder.
-
-## Run
-```
-npm install            # first time (downloads Electron)
-npm run dev            # Vite dev server + Electron with live reload
-npm start              # build renderer, then run Electron against dist/
-MAIL_DEMO=1 npm start  # sample mailbox, no Google connection
-npm test               # unit tests
-npm run dist           # package with electron-builder (release/)
-```
 On a headless Linux box the demo can be exercised under Xvfb:
 `env -u ELECTRON_RUN_AS_NODE MAIL_DEMO=1 MAIL_SCREENSHOT=/tmp/shots xvfb-run -a ./node_modules/electron/dist/electron . --no-sandbox`
 (VS Code terminals export `ELECTRON_RUN_AS_NODE=1`, which turns the Electron binary into plain Node — unset it.)
 
-## Behaviour notes
-- **Initial sync** pins the history cursor first, then walks `messages.list` newest-first in batches of 50
-  (metadata only, ~50 msgs/s under the default quota). It is resumable (`next_page_token` persisted),
-  so closing the app mid-sync is fine. Bodies download on first open and are cached.
-- **Incremental sync** every 60 s (Settings) via `history.list`; a 404 (expired history) triggers a clean resync.
-- **Search**: Enter = local FTS over subject/from/to/snippet/cached bodies (prefix matching).
-  **Deep search** = Gmail's own `q` search (bodies + attachment contents, full Gmail syntax); results are pulled into the local cache.
-- **Snooze** removes INBOX, adds a `Snoozed` label (created on demand) and stores the wake time locally;
-  a 30 s timer puts it back in the inbox unread. The wake timer is per PC (only the PC that snoozed it wakes it).
-- **Categories**: Primary = inbox messages carrying no `CATEGORY_*` label; Promotions/Social tabs filter on Gmail's labels.
-- **Remote images** are blocked by default (per-message "Load images" button; global toggle in Settings).
-  HTML is rendered in a sandboxed iframe; links open in the system browser.
-- **Move to folder** follows Gmail semantics: adds the target label, removes the label of the folder you were viewing.
-- Keyboard in the list: ↑/↓ move · Delete = trash · e = archive · u = read/unread · s = flag · r/a/f = reply/reply all/forward · n = new · Esc = clear selection.
+## Releasing
+1. Add repository secrets `TOMAIL_GOOGLE_CLIENT_ID` and `TOMAIL_GOOGLE_CLIENT_SECRET`.
+2. Bump `version` in `package.json`, commit, tag `vX.Y.Z`, push the tag.
+3. The **Release** workflow builds all three platforms and attaches installers to a GitHub Release; installed copies pick it up automatically.
 
-## Not in v1 (candidates for next)
-Drafts (Gmail DRAFT folder is read-only here), threaded conversation view, rich-text compose, empty trash / permanent delete,
-Google push notifications (Pub/Sub) instead of polling, rules/filters, calendar invites, per-account signatures, printing.
+### Google verification (read this before publishing widely)
+`gmail.modify` is a **restricted** scope. While the OAuth consent screen is in *Testing* mode Google allows up to
+100 test users and expires their sign-in every 7 days (Tomail shows a "Sign in again" button when that happens).
+To remove those limits the app must pass Google's OAuth verification, which for restricted Gmail scopes includes an
+annual third-party CASA security assessment. Plan for that before promoting Tomail beyond a test group.
+
+## How it works
+```
+electron/main.js        app lifecycle, window, IPC, sync scheduler, snooze timer, auto-update
+electron/preload.cjs    contextBridge → window.mail.*  (the renderer never touches the network or database)
+electron/db.js          SQLite (node:sqlite, bundled with Electron) schema + queries + FTS5 search
+electron/accounts.js    token storage (safeStorage-encrypted) + per-account Gmail client
+electron/actions.js     every user action: optimistic local change → Gmail call → revert on failure
+electron/gmail/oauth.js PKCE loopback OAuth for a Google "Desktop app" client
+electron/gmail/api.js   Gmail REST client: refresh on 401, backoff on 429/5xx, multipart batch GETs
+electron/gmail/sync.js  resumable newest-first initial sync (metadata only) + history.list increments
+electron/gmail/mime.js  Gmail payload → text/html/attachments; outgoing → RFC 2822
+src/                    React renderer (no UI libraries; icons are inline SVG)
+test/                   unit tests for db, mime, batch parsing, sync and actions
+```
+- Initial sync pins the history cursor, then walks `messages.list` newest-first in batches of 50 (metadata only).
+  Bodies download on first open and are cached. Incremental sync runs every 60 s via `history.list`; an expired
+  history (404) triggers a clean resync.
+- Snooze removes `INBOX`, adds a `Snoozed` label (created on demand) and stores the wake time locally; a timer
+  puts the message back in the inbox, unread. The timer lives on the PC that snoozed it.
+- Primary = inbox messages with no `CATEGORY_*` label; Promotions/Social follow Gmail's own categorisation.
+- Move follows Gmail semantics: add the target label, drop the label of the folder you were viewing.
+
+## Roadmap
+Drafts, threaded conversation view, rich-text compose, empty trash, push notifications (Pub/Sub) instead of polling,
+IMAP/SMTP for non-Google accounts, code signing.
+
+## License
+MIT — see [LICENSE](LICENSE).

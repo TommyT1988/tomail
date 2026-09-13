@@ -166,7 +166,7 @@ test('actions: optimistic modify + revert on failure, snooze/unsnooze, send thre
   const sendCall = g.calls.find(c => c[1] === '/messages/send');
   assert.equal(sendCall[2].threadId, 'tm1');
   assert.match(b64urlDecode(sendCall[2].raw).toString(), /In-Reply-To: <m1@x>/);
-  assert.match(b64urlDecode(sendCall[2].raw).toString(), /From: "?Tomas"? <a@x.com>/);
+  assert.match(b64urlDecode(sendCall[2].raw).toString(), /From: "?Alex"? <a@x.com>/);
   assert.equal(sent.id, 'sent1');
   assert.equal(db.getMessage(a.id, 'sent1')?.labels[0], 'SENT', 'sent message pulled into local Sent');
 });

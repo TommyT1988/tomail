@@ -13,8 +13,8 @@ const { seedDemo, DemoClient } = require('./demo');
 const DEMO = process.env.MAIL_DEMO === '1';
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
-app.setName('Mail');
-app.setPath('userData', path.join(app.getPath('appData'), DEMO ? 'tab-mail-demo' : 'tab-mail'));
+app.setName('Tomail');
+app.setPath('userData', path.join(app.getPath('appData'), DEMO ? 'tomail-demo' : 'tomail'));
 
 let win, db, settings, accounts, actions;
 const syncers = new Map();      // accountId → AccountSync
@@ -50,7 +50,7 @@ function scheduleSync() {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1280, height: 1015, minWidth: 900, minHeight: 600, title: 'Mail', autoHideMenuBar: true, show: false,
+    width: 1280, height: 1015, minWidth: 900, minHeight: 600, title: 'Tomail', autoHideMenuBar: true, show: false,
     backgroundColor: '#f6f6f6',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true },
   });
@@ -87,7 +87,7 @@ function handle(channel, fn) {
 }
 
 function registerIpc() {
-  handle('app:info', () => ({ version: app.getVersion(), demo: DEMO, userData: app.getPath('userData'), encrypted: safeStorage.isEncryptionAvailable() }));
+  handle('app:info', () => ({ version: app.getVersion(), demo: DEMO, userData: app.getPath('userData'), encrypted: safeStorage.isEncryptionAvailable(), hasGoogleClient: accounts.hasClient(), packaged: app.isPackaged }));
   handle('settings:get', () => settings.get());
   handle('settings:set', (patch) => { const s = settings.set(patch); scheduleSync(); return s; });
 
@@ -133,7 +133,7 @@ function registerIpc() {
     return r.filePath;
   });
   handle('attachments:open', async (accountId, messageId, att) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tab-mail-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tomail-'));
     const file = path.join(dir, (att.filename || 'attachment').replace(/[\\/:*?"<>|]/g, '_'));
     fs.writeFileSync(file, await actions.getAttachment(accountId, messageId, att.attachmentId));
     const err = await shell.openPath(file);
@@ -160,6 +160,17 @@ app.whenReady().then(async () => {
   actions = new Actions({ db, clients: (id) => accounts.client(id), onChange: notifyChanged, log });
   registerIpc();
   createWindow();
+  if (app.isPackaged && !DEMO) {
+    // Auto-update from GitHub Releases (electron-builder publish config). Never fatal.
+    try {
+      const { autoUpdater } = require('electron-updater');
+      autoUpdater.logger = { info: log, warn: log, error: log, debug: () => {} };
+      autoUpdater.on('update-downloaded', (info) => send('app:update-ready', { version: info.version }));
+      autoUpdater.checkForUpdatesAndNotify().catch(e => log('update check:', e.message));
+      setInterval(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 6 * 3600 * 1000);
+      ipcMain.handle('app:installUpdate', () => { autoUpdater.quitAndInstall(); return true; });
+    } catch (e) { log('updater unavailable:', e.message); }
+  }
   syncAll().catch(() => {});
   scheduleSync();
   snoozeTimer = setInterval(() => actions.wakeDueSnoozes().then(n => { if (n) notifyChanged(); }).catch(e => log('snooze wake:', e.message)), 30000);

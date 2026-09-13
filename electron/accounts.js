@@ -3,6 +3,7 @@
 // available) + per-account GmailClient factory with automatic refresh.
 const { GmailClient } = require('./gmail/api');
 const oauth = require('./gmail/oauth');
+const { BUILTIN, hasBuiltin } = require('./gmail/oauthClient');
 
 class AccountManager {
   constructor({ db, settings, safeStorage, log = () => {} }) {
@@ -10,11 +11,14 @@ class AccountManager {
     this.clients = new Map();
     this.refreshing = new Map();
   }
+  /** Custom client from Settings → Advanced wins; otherwise the client built into this release. */
   get oauthConfig() {
     const { clientId, clientSecret } = this.settings.get().oauth;
-    if (!clientId || !clientSecret) { const e = new Error('Google OAuth client ID / secret not set — open Settings first.'); e.code = 'NO_OAUTH'; throw e; }
-    return { clientId, clientSecret };
+    if (clientId && clientSecret) return { clientId, clientSecret };
+    if (hasBuiltin()) return { ...BUILTIN };
+    const e = new Error('This build has no Google sign-in client. Add your own under Settings → Advanced.'); e.code = 'NO_OAUTH'; throw e;
   }
+  hasClient() { try { return !!this.oauthConfig; } catch { return false; } }
   encryptTokens(t) {
     const s = JSON.stringify(t);
     if (this.safeStorage?.isEncryptionAvailable?.()) return Buffer.concat([Buffer.from('enc:'), this.safeStorage.encryptString(s)]);

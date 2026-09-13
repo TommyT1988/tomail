@@ -37,7 +37,7 @@ export default function Sidebar({ accounts, labels, counts, view, setView, statu
 
   return (
     <div className="sidebar">
-      <h1>Mail</h1>
+      <h1>Tomail</h1>
       <div className="tree">
         <div className="sect" onClick={() => toggle('fav')}><span className="tw">{collapsed.fav ? '▸' : '▾'}</span><Icon name="star" size={11} fill /> Favorites</div>
         {!collapsed.fav && <>

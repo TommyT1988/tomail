@@ -33,6 +33,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [toastMsg, setToastMsg] = useState(null);
+  const [signingIn, setSigningIn] = useState(false);
+  const [updateReady, setUpdateReady] = useState(null);
   const [listH, setListH] = useState(() => Number(localStorage.getItem('listH')) || 440);
   const [, tick] = useState(0);
   const viewRef = useRef(view); viewRef.current = view;
@@ -67,8 +69,9 @@ export default function App() {
   useEffect(() => {
     const off1 = mail.on('mail:changed', () => { loadMeta(); loadList(viewRef.current); });
     const off2 = mail.on('sync:status', (s) => setStatus(s));
+    const off3 = mail.on('app:update-ready', (u) => setUpdateReady(u));
     const t = setInterval(() => tick(x => x + 1), 30000);
-    return () => { off1(); off2(); clearInterval(t); };
+    return () => { off1(); off2(); off3(); clearInterval(t); };
   }, [loadMeta, loadList]);
   useEffect(() => { if (!settingsOpen) mail.settings.get().then(s => setPrefs(s.prefs)); }, [settingsOpen]);
 
@@ -202,14 +205,14 @@ export default function App() {
         <div className="main">
           {!accounts.length && info && !info.demo ? (
             <div className="onboard">
-              <h2>Welcome to Mail</h2>
-              <p>Connect a Google Workspace account to get started. Mail keeps a local copy of your mailbox for instant search and works with Gmail labels, so anything you do here shows up in Gmail too.</p>
-              <div className="steps"><ol>
-                <li>Open <b>Settings → Google API</b> and paste the OAuth client ID + secret (instructions there).</li>
-                <li><b>Settings → Accounts → Add Google account</b> and sign in.</li>
-                <li>Initial sync runs in the background; the newest mail appears first.</li>
-              </ol></div>
-              <p><button className="primary" onClick={() => setSettingsOpen(true)}>Open Settings</button></p>
+              <h2>Welcome to Tomail</h2>
+              <p>A fast desktop client for Gmail and Google Workspace. Tomail keeps a local copy of your mailbox for instant search and works with Gmail labels, so anything you do here shows up in Gmail too.</p>
+              {info.hasGoogleClient ? (
+                <p><button className="primary" disabled={signingIn} onClick={async () => { setSigningIn(true); try { const r = await mail.accounts.add(); toast(`Signed in as ${r.account.email} — downloading mailbox`); loadMeta(); } catch (e) { toast(e.message, true); } finally { setSigningIn(false); } }}>{signingIn ? 'Waiting for Google sign-in in your browser…' : 'Sign in with Google'}</button></p>
+              ) : (
+                <div className="steps"><p>This build has no built-in Google sign-in. Add your own Google API client under <b>Settings → Advanced</b> (instructions there), then sign in.</p><p><button className="primary" onClick={() => setSettingsOpen(true)}>Open Settings</button></p></div>
+              )}
+              <p className="muted">Your browser opens for sign-in. Tomail asks for Gmail read/label/send access only and never deletes mail permanently.</p>
             </div>
           ) : (
             <div className="split">
@@ -230,6 +233,7 @@ export default function App() {
         <span><span className={'led' + (anyErr ? ' err' : anyBusy ? ' busy' : '')} />
           {anyErr ? `Sync problem: ${anyErr.error}` : initial ? `Downloading mailbox… ${(initial[1].synced || 0).toLocaleString()}${initial[1].total ? ' of ' + initial[1].total.toLocaleString() : ''}` : anyBusy ? 'Checking for new mail…' : `Last checked ${ago(status.lastCheckedAt)}`}</span>
         {info?.demo && <span style={{ color: '#c0392b' }}>DEMO MODE — sample data, not connected to Google</span>}
+        {updateReady && <span>Tomail {updateReady.version} downloaded — <button className="primary" onClick={() => mail.app.installUpdate()}>Restart to update</button></span>}
         <span className="spacer" />
         <button onClick={() => setSettingsOpen(true)}><Icon name="settings" size={12} /> Settings</button>
         <button onClick={() => { mail.sync.now(); }} disabled={!accounts.length || info?.demo}><Icon name="refresh" size={12} /> Sync now</button>
