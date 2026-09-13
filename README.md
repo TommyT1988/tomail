@@ -2,7 +2,7 @@
 <h1 align="center">Tomail</h1>
 <p align="center">A fast, keyboard-friendly desktop email client for Gmail, Google Workspace and any IMAP mailbox.<br>Windows · macOS · Linux</p>
 
-<p align="center"><img src="docs/screenshots/inbox.png" width="800" alt="Tomail inbox"></p>
+<p align="center"><img src="docs/screenshots/inbox-2.png" width="800" alt="Tomail inbox"></p>
 
 Tomail keeps a local copy of your mail, so folders, unread counts and search are instant even on a 60,000-message inbox, and it works when you're offline. Everything you do (read, flag, archive, move, snooze, rules) is applied to your provider too, so your phone and webmail stay in step.
 
@@ -39,7 +39,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Attachment previews: inline image thumbnails, a viewer for images, PDFs and text
 - Calendar invitations show as a card with Accept / Maybe / Decline that replies to the organiser
 
-<p align="center"><img src="docs/screenshots/conversation.png" width="800" alt="Conversation view"></p>
+<p align="center"><img src="docs/screenshots/conversation-2.png" width="800" alt="Conversation view"></p>
 
 **Triage**
 - Read / unread, flag, archive, delete, move, junk, all instant and synced, with **Undo**
@@ -57,7 +57,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Outbox: no connection? The message waits and goes out when you're back online
 - Per-account signatures
 
-<p align="center"><img src="docs/screenshots/compose.png" width="700" alt="Compose window"></p>
+<p align="center"><img src="docs/screenshots/compose-2.png" width="700" alt="Compose window"></p>
 
 **Search**
 - Instant local search across subject, sender, recipients and downloaded bodies
@@ -73,7 +73,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Housekeeping: optionally keep downloaded bodies for 30 / 90 / 365 days; weekly database compaction
 - Something wrong? **Settings → Report a problem** opens a GitHub issue with the version and recent log attached (email addresses redacted)
 
-<p align="center"><img src="docs/screenshots/dark.png" width="800" alt="Dark mode"></p>
+<p align="center"><img src="docs/screenshots/dark-2.png" width="800" alt="Dark mode"></p>
 
 ### Keyboard
 
