@@ -1,8 +1,8 @@
 <p align="center"><img src="build/icon-256.png" width="96" alt="Tomail"></p>
 <h1 align="center">Tomail</h1>
-<p align="center">A fast, keyboard-friendly desktop email client for Gmail, Google Workspace and any IMAP mailbox.<br>Windows · macOS · Linux</p>
+<p align="center">A fast, keyboard-friendly desktop email client for Gmail, Google Workspace and any IMAP mailbox.<br>Windows · macOS · Linux · optional local AI</p>
 
-<p align="center"><img src="docs/screenshots/inbox-2.png" width="800" alt="Tomail inbox"></p>
+<p align="center"><img src="docs/screenshots/inbox-3.png" width="800" alt="Tomail inbox"></p>
 
 Tomail keeps a local copy of your mail, so folders, unread counts and search are instant even on a 60,000-message inbox, and it works when you're offline. Everything you do (read, flag, archive, move, snooze, rules) is applied to your provider too, so your phone and webmail stay in step.
 
@@ -43,7 +43,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - **Quick reply** under every message (Ctrl+Enter to send), and inline reply from notifications on macOS
 - **Tabs**: Ctrl+click a folder or middle-click a message to open it in a tab; searches open in their own tab
 
-<p align="center"><img src="docs/screenshots/conversation-2.png" width="800" alt="Conversation view"></p>
+<p align="center"><img src="docs/screenshots/conversation-3.png" width="800" alt="Conversation view"></p>
 
 **Triage**
 - Read / unread, flag, archive, delete, move, junk, all instant and synced, with **Undo**
@@ -55,7 +55,8 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 
 **Writing**
 - Compose opens in its own window: reply, reply all, forward (with original attachments), new
-- Rich text: bold, italic, underline, lists, quotes, links, pasted or inserted images
+- Send, Attach and Save draft live at the top of the window; recipients are chips (click to select, Delete to remove, double-click to edit)
+- Rich text: bold, italic, underline, lists, quotes, links, pasted or inserted images, an emoji picker
 - Address autocomplete from the people you write to and hear from, plus **Google Contacts** import (Settings → Accounts; asks for read-only contacts access once, refreshes daily)
 - Drafts auto-save and are mirrored to your provider's Drafts folder, so you can finish them elsewhere
 - Undo send: a countdown after pressing Send (default 5 s); **Send later** at a chosen time, with a Scheduled view to change your mind
@@ -63,7 +64,8 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Outbox: no connection? The message waits and goes out when you're back online
 - Per-account signatures
 
-<p align="center"><img src="docs/screenshots/compose-2.png" width="700" alt="Compose window"></p>
+<p align="center"><img src="docs/screenshots/compose-3.png" width="700" alt="Compose window"></p>
+<p align="center"><img src="docs/screenshots/window-3.png" width="700" alt="A message in its own window"></p>
 
 **✨ Local AI (optional)**
 - Install [Ollama](https://ollama.com/download), then Settings → AI: pick or download a model (2–5 GB) and switch it on. Everything runs on your own computer; nothing is sent anywhere.
@@ -90,7 +92,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Achievements, if you like that sort of thing (switchable)
 - Something wrong? **Settings → Report a problem** opens a GitHub issue with the version and recent log attached (email addresses redacted)
 
-<p align="center"><img src="docs/screenshots/dark-2.png" width="800" alt="Dark mode"></p>
+<p align="center"><img src="docs/screenshots/dark-3.png" width="800" alt="Dark mode"></p>
 
 ### Keyboard
 
@@ -101,6 +103,8 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 | r / a / f | Reply / Reply all / Forward |
 | n | New message |
 | o | Open message in a window |
+| Ctrl+Enter | Send a quick reply |
+| ; trigger + space | Expand a snippet (compose) |
 | e | Archive |
 | Delete | Move to Trash |
 | u | Read / unread |
@@ -150,6 +154,9 @@ electron/accounts.js      encrypted secret storage, Gmail token refresh, provide
 electron/providers/       gmail.js (REST + history sync) · imap.js (folders as labels, IDLE push, keyword snooze)
 electron/actions.js       every user action: optimistic local change → provider → revert on failure
 electron/rules.js         rules engine · electron/calendar.js  iCalendar parse/reply · electron/logger.js  rotating log
+electron/ai.js            local AI client (Ollama / OpenAI-compatible) + prompts · electron/links.js  link cleaning
+electron/achievements.js  milestones · electron/appLock.js  passphrase lock · electron/exportMbox.js  mbox export
+src/phishing.js           phishing heuristics (pure, tested)
 src/                      React renderer: App, Sidebar, MessageList, ReadingPane, Compose, RichEditor, Settings, Rules…
 test/                     node:test suite (db, mime, batch parsing, sync, actions, threads, rules, contacts, outbox, search)
 ```
@@ -157,6 +164,19 @@ test/                     node:test suite (db, mime, batch parsing, sync, action
 - **Sync.** Gmail: a resumable newest-first initial pass (headers only) then `history.list` increments, paced by a quota budget under Google's 15,000 units/minute. IMAP: per-folder resumable backfill, CONDSTORE flag deltas, UID-diff deletions, IDLE on the inbox. Bodies download on first open and are cached.
 - **Labels everywhere.** IMAP folders map onto the same label ids the Gmail provider uses (`INBOX`, `SENT`, `TRASH`, `SPAM`, `DRAFT`, `ARCHIVE`), flags onto `UNREAD` / `STARRED`, and a label change becomes a move; message ids are `folder::uid` and a move re-keys the local row so cached bodies survive.
 - **Snooze** stores the wake time as a hidden Gmail label (`Tomail/until/…`) or an IMAP keyword (`$TomailUntil…`).
+
+## Release history
+
+| Version | Highlights |
+|---|---|
+| 0.8 | Local AI via Ollama: summaries, suggested replies, drafting in your tone, rewriting, rules from a sentence |
+| 0.7 | Send later, snippets, quick reply, tabs, phishing warnings, app lock, mbox export, clean links, achievements |
+| 0.6 | Follow-up reminders, sender card with SPF/DKIM/DMARC |
+| 0.5 | App icon, log + problem reports, undo and undo-send, attachment previews, folder management, outbox, message windows, search operators, Google Contacts, recipient chips, emoji |
+| 0.4 | Compose in its own window, Gmail quota pacing, sortable columns, account ordering, ARM64 builds |
+| 0.3 | IMAP IDLE push, cross-device snooze, rules, address autocomplete, dark-mode fixes |
+| 0.2 | IMAP/SMTP accounts, drafts, conversation view, rich text, notifications, calendar invites, printing, dark mode, filters |
+| 0.1 | Gmail client with local mirror, search, snooze, multiple accounts |
 
 ## Roadmap
 
