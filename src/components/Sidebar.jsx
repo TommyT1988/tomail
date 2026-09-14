@@ -4,7 +4,7 @@ import Icon from './Icons.jsx';
 
 function Item({ active, onClick, onContextMenu, icon, name, count, unread, indent = 0, tw, cls = '', color }) {
   return (
-    <div className={`item indent${indent} ${active ? 'active' : ''} ${cls}`} onClick={onClick} onContextMenu={onContextMenu}>
+    <div className={`item indent${indent} ${active ? 'active' : ''} ${cls}`} onClick={onClick} onAuxClick={(e) => { if (e.button === 1) onClick(e); }} onContextMenu={onContextMenu}>
       {tw !== undefined ? <span className="tw">{tw}</span> : null}
       {icon !== undefined && <span className="ico" style={color ? { color } : undefined}><Icon name={icon} size={13} fill={!!color} /></span>}
       <span className="name" title={name}>{name}</span>
@@ -13,7 +13,9 @@ function Item({ active, onClick, onContextMenu, icon, name, count, unread, inden
   );
 }
 
-export default function Sidebar({ accounts, labels, counts, view, setView, status, draftCounts, onReorder, onLabelMenu, outboxCount, followups }) {
+export default function Sidebar({ accounts, labels, counts, view, setView: setViewRaw, status, draftCounts, onReorder, onLabelMenu, outboxCount, followups, scheduledCount, onOpenTab }) {
+  // Ctrl/middle-click on any folder opens it in a new tab
+  const setView = (v, e) => { if (e && (e.ctrlKey || e.metaKey || e.button === 1)) onOpenTab?.(v); else setViewRaw(v); };
   const [collapsed, setCollapsed] = useState({});
   const [dragId, setDragId] = useState(null);
   const [overId, setOverId] = useState(null);
@@ -33,7 +35,7 @@ export default function Sidebar({ accounts, labels, counts, view, setView, statu
       <React.Fragment key={key}>
         <Item indent={Math.min(3, depth)} tw={n.children.length ? (open ? '▾' : '▸') : ''} icon="folder" name={n.name} color={l?.color_bg || undefined}
           count={c.unread} unread active={l && isView({ kind: 'label', accountId: aid, labelId: l.id })} onContextMenu={(e) => { if (l) { e.preventDefault(); onLabelMenu?.(e, aid, l); } }}
-          onClick={(e) => { if (e.target.classList.contains('tw') && n.children.length) { toggle(key); return; } if (l) setView({ kind: 'label', accountId: aid, labelId: l.id }); else toggle(key); }} />
+          onClick={(e) => { if (e.target.classList.contains('tw') && n.children.length) { toggle(key); return; } if (l) setView({ kind: 'label', accountId: aid, labelId: l.id }, e); else toggle(key); }} />
         {open && n.children.length > 0 && renderTree(n.children, aid, depth + 1)}
       </React.Fragment>
     );
@@ -45,11 +47,12 @@ export default function Sidebar({ accounts, labels, counts, view, setView, statu
       <div className="tree">
         <div className="sect" onClick={() => toggle('fav')}><span className="tw">{collapsed.fav ? '▸' : '▾'}</span><Icon name="star" size={11} fill /> Favorites</div>
         {!collapsed.fav && <>
-          <Item indent={1} icon="inbox" name="All Inboxes" count={fav.inboxTotal} unread={fav.inboxUnread > 0} active={isView({ kind: 'all-inboxes' })} onClick={() => setView({ kind: 'all-inboxes', category: 'primary' })} />
-          <Item indent={1} icon="dot" name="Unread" count={fav.unread} unread active={isView({ kind: 'unread' })} onClick={() => setView({ kind: 'unread' })} />
-          <Item indent={1} icon="flag" name="Flagged" count={fav.starred} active={isView({ kind: 'starred' })} onClick={() => setView({ kind: 'starred' })} />
-          <Item indent={1} icon="clock" name="Snoozed" count={fav.snoozed} active={isView({ kind: 'snoozed' })} onClick={() => setView({ kind: 'snoozed' })} />
+          <Item indent={1} icon="inbox" name="All Inboxes" count={fav.inboxTotal} unread={fav.inboxUnread > 0} active={isView({ kind: 'all-inboxes' })} onClick={(e) => setView({ kind: 'all-inboxes', category: 'primary' }, e)} />
+          <Item indent={1} icon="dot" name="Unread" count={fav.unread} unread active={isView({ kind: 'unread' })} onClick={(e) => setView({ kind: 'unread' }, e)} />
+          <Item indent={1} icon="flag" name="Flagged" count={fav.starred} active={isView({ kind: 'starred' })} onClick={(e) => setView({ kind: 'starred' }, e)} />
+          <Item indent={1} icon="clock" name="Snoozed" count={fav.snoozed} active={isView({ kind: 'snoozed' })} onClick={(e) => setView({ kind: 'snoozed' }, e)} />
           <Item indent={1} icon="edit" name="Drafts" count={draftCounts?.all || 0} active={isView({ kind: 'drafts' })} onClick={() => setView({ kind: 'drafts' })} />
+          {scheduledCount > 0 && <Item indent={1} icon="clock" name="Scheduled" count={scheduledCount} active={isView({ kind: 'scheduled' })} onClick={() => setViewRaw({ kind: 'scheduled' })} />}
           {(followups?.total > 0) && <Item indent={1} icon="clock" name="Follow-ups" count={followups.due} unread active={isView({ kind: 'followups' })} onClick={() => setView({ kind: 'followups' })} />}
           {outboxCount > 0 && <Item indent={1} icon="send" name="Outbox" count={outboxCount} unread active={isView({ kind: 'outbox' })} onClick={() => setView({ kind: 'outbox' })} />}
         </>}
@@ -76,7 +79,7 @@ export default function Sidebar({ accounts, labels, counts, view, setView, statu
                   const c = f.id === 'ALL' ? { total: (lc(a.id, 'INBOX').total || 0) } : lc(a.id, f.id);
                   const showUnread = f.id === 'INBOX';
                   return <Item key={f.id} indent={1} icon={f.icon} name={f.name} count={showUnread ? c.unread : c.total} unread={showUnread}
-                    active={isView(v)} onClick={() => setView(f.id === 'INBOX' && a.kind !== 'imap' ? { ...v, category: 'primary' } : v)} />;
+                    active={isView(v)} onClick={(e) => setView(f.id === 'INBOX' && a.kind !== 'imap' ? { ...v, category: 'primary' } : v, e)} />;
                 })}
                 {tree.length > 0 && <>
                   <div className="sect" onClick={() => toggle(key + 'more')}><span className="tw">{collapsed[key + 'more'] ? '▸' : '▾'}</span>More</div>

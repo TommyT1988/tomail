@@ -13,6 +13,10 @@ const { autoconfig, ImapProvider } = require('./providers/imap');
 const { buildDoc } = require('./printDoc');
 const { runRules } = require('./rules');
 const { createLogger } = require('./logger');
+const { cleanUrl } = require('./links');
+const { exportMbox } = require('./exportMbox');
+const achievements = require('./achievements');
+const appLock = require('./appLock');
 
 const DEMO = process.env.MAIL_DEMO === '1';
 let log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);   // replaced by the file logger once userData is known
@@ -51,6 +55,12 @@ const syncing = new Set();
 const lastSyncAt = new Map();   // accountId → ms
 const pushTimers = new Map();
 
+/** Every external link goes through here: tracking params stripped, redirectors unwrapped (Settings → General). */
+function openLink(url) {
+  if (!/^https?:|^mailto:/.test(url)) return;
+  const p = settings.get().prefs;
+  shell.openExternal(p.cleanLinks === false ? url : cleanUrl(url));
+}
 function send(channel, payload) { for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload); }
 function notifyChanged() { clearTimeout(changeTimer); changeTimer = setTimeout(() => send('mail:changed', {}), 300); }
 function broadcastStatus() { send('sync:status', { accounts: syncStatus, lastCheckedAt }); }
@@ -101,8 +111,9 @@ function notifyNewMail(accountId, ids) {
   if (focused && settings.get().prefs.notifyWhenFocused === false) return;
   const extra = ids.length - msgs.length;
   for (const m of msgs) {
-    const n = new Notification({ title: (m.fromName || m.fromEmail || 'New mail') + (extra > 0 && m === msgs[msgs.length - 1] ? ` (+${extra} more)` : ''), body: (m.subject || '(no subject)') + (m.snippet ? '\n' + m.snippet : ''), silent: false });
-    n.on('click', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); send('app:open-message', { accountId, id: m.id }); } });
+    const n = new Notification({ title: (m.fromName || m.fromEmail || 'New mail') + (extra > 0 && m === msgs[msgs.length - 1] ? ` (+${extra} more)` : ''), body: (m.subject || '(no subject)') + (m.snippet ? '\n' + m.snippet : ''), silent: false, hasReply: process.platform === 'darwin', replyPlaceholder: 'Reply…' });
+    n.on('click', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); send('app:open-message', { accountId, id: m.id, quickReply: true }); } });
+    n.on('reply', (_e, text) => { if (text?.trim()) ipcMain.emit('quick-reply', null, accountId, m.id, text); });
     n.show();
   }
 }
@@ -114,8 +125,8 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true },
   });
   win.once('ready-to-show', () => win.show());
-  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:|^mailto:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('http://localhost') && !url.startsWith('app://')) { e.preventDefault(); if (/^https?:|^mailto:/.test(url)) shell.openExternal(url); } });
+  win.webContents.setWindowOpenHandler(({ url }) => { openLink(url); return { action: 'deny' }; });
+  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('http://localhost') && !url.startsWith('app://')) { e.preventDefault(); openLink(url); } });
   win.webContents.on('context-menu', (_e, params) => {
     if (!params.isEditable) return;
     const items = params.dictionarySuggestions.map(s => ({ label: s, click: () => win.webContents.replaceMisspelling(s) }));
@@ -177,7 +188,7 @@ function openComposeWindow(payload) {
   });
   composeWins.set(id, { win: cw, payload });
   cw.once('ready-to-show', () => cw.show());
-  cw.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:|^mailto:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  cw.webContents.setWindowOpenHandler(({ url }) => { openLink(url); return { action: 'deny' }; });
   cw.webContents.on('context-menu', (_e, params) => {
     if (!params.isEditable) return;
     const items = params.dictionarySuggestions.map(s => ({ label: s, click: () => cw.webContents.replaceMisspelling(s) }));
@@ -205,7 +216,7 @@ function openMessageWindow(accountId, id) {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   messageWins.set(key, mw);
   mw.once('ready-to-show', () => mw.show());
-  mw.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:|^mailto:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  mw.webContents.setWindowOpenHandler(({ url }) => { openLink(url); return { action: 'deny' }; });
   mw.on('closed', () => messageWins.delete(key));
   const remember = () => { if (!mw.isDestroyed() && !mw.isMinimized() && !mw.isMaximized()) settings.set({ prefs: { messageBounds: mw.getBounds() } }); };
   mw.on('resize', remember); mw.on('move', remember);
@@ -227,6 +238,16 @@ function queueSend(payload) {
   pendingSends.set(id, { timer: setTimeout(fire, delay), payload });
   send('send:state', { id, state: 'pending', subject: payload.subject, until: Date.now() + delay, draftId: payload.draftId, accountId: payload.accountId });
   return id;
+}
+function checkAchievements() {
+  if (settings.get().prefs.achievements === false) return [];
+  try {
+    const unlocked = db.kvGet('achievements') || {};
+    const fresh = achievements.evaluate(db.activity(), unlocked);
+    for (const a of fresh) unlocked[a.id] = Date.now();
+    if (fresh.length) { db.kvSet('achievements', unlocked); send('achievements:unlocked', fresh.map(({ id, title, body }) => ({ id, title, body }))); }
+    return fresh;
+  } catch (e) { log('achievements:', e.message); return []; }
 }
 function housekeeping() {
   for (const a of db.listAccounts()) {
@@ -392,7 +413,45 @@ function registerIpc() {
   });
   handle('sync:now', (accountId) => { syncAll(accountId || null).catch(() => {}); return true; });
   handle('sync:status', () => ({ accounts: syncStatus, lastCheckedAt }));
-  handle('shell:openExternal', (url) => { if (/^https?:|^mailto:/.test(url)) shell.openExternal(url); return true; });
+  handle('shell:openExternal', (url) => { openLink(url); return true; });
+  handle('links:preview', (url) => cleanUrl(url));
+  // scheduled sends
+  handle('scheduled:add', (payload, sendAt) => { const id = db.addScheduled(payload.accountId, payload, Number(sendAt)); notifyChanged(); return id; });
+  handle('scheduled:list', () => db.listScheduled());
+  handle('scheduled:sendNow', async (id) => { const it = db.getScheduled(id); if (!it) throw new Error('Not scheduled'); await actions.send({ ...it.payload, draftId: undefined }); db.removeScheduled(id); notifyChanged(); return true; });
+  handle('scheduled:reschedule', (id, sendAt) => { db.updateScheduled(id, Number(sendAt)); notifyChanged(); return true; });
+  handle('scheduled:cancel', async (id) => { const it = db.getScheduled(id); if (!it) return false; db.removeScheduled(id); notifyChanged(); const d = actions.db.saveDraft({ accountId: it.account_id, mode: it.payload.mode || 'new', replyTo: it.payload.replyTo || null, to: it.payload.to, cc: it.payload.cc, bcc: it.payload.bcc, subject: it.payload.subject, bodyHtml: it.payload.html, bodyText: it.payload.text, attachments: it.payload.attachments || [], quotedHtml: it.payload.quotedHtml, quotedText: it.payload.quotedText }); return d.id; });
+  // snippets
+  handle('snippets:list', () => db.listSnippets());
+  handle('snippets:save', (s) => { const id = db.saveSnippet(s); send('snippets:changed', {}); return id; });
+  handle('snippets:remove', (id) => { db.deleteSnippet(id); send('snippets:changed', {}); return true; });
+  // quick reply (from the reading pane or a notification)
+  handle('messages:quickReply', async (accountId, id, text, all) => {
+    const m = await actions.getMessage(accountId, id); if (!m) throw new Error('Message not found');
+    const me = new Set(db.listAccounts().map(a => a.email.toLowerCase()));
+    const to = m.replyTo || (m.fromName ? `"${m.fromName.replace(/"/g, '')}" <${m.fromEmail}>` : m.fromEmail);
+    const others = all ? [...(m.to || []), ...(m.cc || [])].filter(a => !me.has(a.email)).map(a => a.name ? `"${a.name}" <${a.email}>` : a.email).join(', ') : '';
+    const subj = /^re:/i.test(m.subject || '') ? m.subject : `Re: ${m.subject || ''}`;
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const quotedHtml = `<div>On ${new Date(m.date).toLocaleString('en-GB')}, ${esc(m.fromName || m.fromEmail)} wrote:</div><blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${m.bodyHtml || `<div style="white-space:pre-wrap">${esc(m.bodyText || '')}</div>`}</blockquote>`;
+    return actions.send({ accountId, to, cc: others, subject: subj, text, quotedHtml, quotedText: (m.bodyText || '').split('\n').map(l => '> ' + l).join('\n'), replyTo: { accountId, id }, mode: all ? 'replyAll' : 'reply' });
+  });
+  // export
+  handle('export:mbox', async (accountId) => {
+    const a = db.getAccount(accountId); if (!a) throw new Error('Unknown account');
+    const r = await dialog.showSaveDialog(win, { defaultPath: path.join(app.getPath('documents'), `${a.email.replace(/[^\w.-]/g, '_')}.mbox`), filters: [{ name: 'mbox', extensions: ['mbox'] }] });
+    if (r.canceled) return null;
+    const res = await exportMbox(db, accountId, r.filePath, (n) => send('export:progress', { n }));
+    return { file: r.filePath, ...res };
+  });
+  // app lock
+  handle('lock:status', () => ({ enabled: appLock.enabled(settings), idleMinutes: settings.get().prefs.lockIdleMinutes ?? 10 }));
+  handle('lock:set', (pass, current) => { if (appLock.enabled(settings) && !appLock.verify(settings, current || '')) throw new Error('Current passphrase is wrong'); if (pass) appLock.setPass(settings, pass); else appLock.clearPass(settings); return true; });
+  handle('lock:verify', (pass) => appLock.verify(settings, pass));
+  // achievements
+  handle('achievements:list', () => ({ all: achievements.LIST.map(({ id, title, body }) => ({ id, title, body })), unlocked: db.kvGet('achievements') || {} }));
+  handle('achievements:check', () => checkAchievements());
+  handle('achievements:reset', () => { db.kvSet('achievements', {}); return true; });
 }
 
 app.whenReady().then(async () => {
@@ -410,6 +469,8 @@ app.whenReady().then(async () => {
   syncAll().catch(() => {});
   scheduleSync();
   setInterval(() => { try { for (const f of actions.checkFollowups()) { if (!f.notified && Notification.isSupported() && settings.get().prefs.notifications !== false) { const n = new Notification({ title: 'No reply yet: ' + (f.subject || '(no subject)'), body: `Sent to ${f.to} on ${new Date(f.createdAt).toLocaleDateString('en-GB')} — follow up?` }); n.on('click', () => { if (win) { win.show(); win.focus(); send('app:open-followups', {}); } }); n.show(); actions.markFollowupNotified(f.id); } } } catch (e) { log('followups:', e.message); } }, 5 * 60000);
+  setInterval(() => actions.processScheduled().then(n => { if (n) log(`scheduled: sent ${n}`); }).catch(e => log('scheduled:', e.message)), 30000);
+  setInterval(checkAchievements, 60000); setTimeout(checkAchievements, 20000);
   outboxTimer = setInterval(() => actions.processOutbox().then(n => { if (n) log(`outbox: sent ${n}`); }).catch(e => log('outbox:', e.message)), 60000);
   housekeepTimer = setTimeout(housekeeping, 90000); setInterval(housekeeping, 24 * 3600000);
   snoozeTimer = setInterval(() => actions.wakeDueSnoozes().then(n => { if (n) notifyChanged(); }).catch(e => log('snooze wake:', e.message)), 30000);
@@ -425,5 +486,6 @@ app.whenReady().then(async () => {
   }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
+ipcMain.on('quick-reply', (_e, accountId, id, text) => { actions.getMessage(accountId, id).then(async (m) => { if (!m) return; const to = m.replyTo || m.fromEmail; const subj = /^re:/i.test(m.subject || '') ? m.subject : `Re: ${m.subject || ''}`; await actions.send({ accountId, to, subject: subj, text, replyTo: { accountId, id }, mode: 'reply' }); }).catch(e => log('notification reply:', e.message)); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => { clearInterval(syncTimer); clearInterval(snoozeTimer); clearInterval(outboxTimer); clearTimeout(housekeepTimer); for (const a of db?.listAccounts?.() || []) { try { accounts.providers.get(a.id)?.cancel(); } catch {} } try { db?.close(); } catch {} });

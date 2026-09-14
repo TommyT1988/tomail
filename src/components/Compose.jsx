@@ -5,7 +5,7 @@ import RichEditor from './RichEditor.jsx';
 import Icon from './Icons.jsx';
 import AddressInput from './AddressInput.jsx';
 import { Dropdown, MI } from './Menus.jsx';
-import { followUpPresets } from '../util.js';
+import { followUpPresets, sendLaterPresets, htmlToText as h2t } from '../util.js';
 
 /** draft: { mode:'new'|'reply'|'replyAll'|'forward', accountId, original?, draftId?, to?, subject? } */
 export default function Compose({ draft, accounts, prefs, onClose, toast, standalone = false }) {
@@ -33,6 +33,15 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
   const [showCc, setShowCc] = useState(!!f.showCc);
   const [saveState, setSaveState] = useState('');
   const [followUpAt, setFollowUpAt] = useState(null);
+  const [snippets, setSnippets] = useState([]);
+  useEffect(() => { const load = () => window.mail.snippets.list().then(setSnippets).catch(() => {}); load(); return window.mail.on('snippets:changed', load); }, []);
+  const firstName = () => { const t = f.to.split(',')[0] || ''; const n = /^"?([^"<]+?)"?\s*</.exec(t)?.[1] || ''; return n.split(' ')[0] || ''; };
+  const sendLater = async (at) => {
+    if (!f.to.trim()) { toast('Add at least one recipient', true); return; }
+    setSending(true); clearTimeout(saveTimer.current);
+    try { const { html, attachments } = extractInlineImages(f.html); await window.mail.scheduled.add({ accountId, to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, html, text: htmlToText(html), quotedHtml: f.quotedHtml, quotedText: f.quotedText, attachments: [...f.attachments, ...attachments], replyTo: orig ? { accountId: orig.accountId, id: orig.id } : draft.replyTo, mode: draft.mode, forwardAttachments: draft.mode === 'forward' && f.includeOrigAtts, followUpAt }, at); if (latest.current.draftId) await window.mail.drafts.remove(latest.current.draftId).catch(() => {}); toast('Scheduled'); onClose(); }
+    catch (e) { toast(e.message, true); } finally { setSending(false); }
+  };
   const dirty = useRef(false);
   const saveTimer = useRef(null);
   const latest = useRef({ f, accountId, draftId }); latest.current = { f, accountId, draftId };
@@ -90,6 +99,11 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
         <div className="mh">
           {standalone ? <>
             <button className="primary" onClick={send} disabled={sending}>{sending ? 'Sending…' : <><Icon name="send" /> Send</>}</button>
+            <Dropdown title="Send at a later time" label={<><Icon name="clock" /> Send later</>}>
+              <div className="mhead">Send at</div>
+              {sendLaterPresets().map(p => <MI key={p.label} sub={new Date(p.at).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} onClick={() => sendLater(p.at)}>{p.label}</MI>)}
+              <div className="mform" onClick={e => e.stopPropagation()}><input type="datetime-local" onChange={e => { if (e.target.value) sendLater(new Date(e.target.value).getTime()); }} /></div>
+            </Dropdown>
             <button onClick={pick} disabled={sending}><Icon name="clip" /> Attach</button>
             <button onClick={save} disabled={sending}>Save draft</button>
             <Dropdown title="Remind me if nobody replies by…" btnClass={followUpAt ? 'on' : ''} label={<><Icon name="clock" /> {followUpAt ? `Follow up ${new Date(followUpAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : 'Remind me'}</>}>
@@ -112,7 +126,7 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
             {!showCc && <button className="ccbcc" onClick={() => setShowCc(true)}>Cc/Bcc</button>}</div></div>
           {showCc && <><div className="field"><label>Cc</label><AddressInput value={f.cc} onChange={v => set('cc')({ target: { value: v } })} /></div><div className="field"><label>Bcc</label><AddressInput value={f.bcc} onChange={v => set('bcc')({ target: { value: v } })} /></div></>}
           <div className="field"><label>Subject</label><input type="text" value={f.subject} onChange={set('subject')} /></div>
-          <RichEditor value={f.html} onChange={(h) => { setF(x => ({ ...x, html: h })); dirty.current = true; scheduleSave(); }} autoFocus={draft.mode === 'reply' || draft.mode === 'replyAll'} />
+          <RichEditor value={f.html} onChange={(h) => { setF(x => ({ ...x, html: h })); dirty.current = true; scheduleSave(); }} autoFocus={draft.mode === 'reply' || draft.mode === 'replyAll'} snippets={snippets} vars={{ firstName: firstName(), name: firstName(), date: new Date().toLocaleDateString('en-GB'), subject: f.subject, me: acct?.display_name || acct?.email || '' }} />
           {(f.attachments.length > 0 || (draft.mode === 'forward' && orig?.attachments?.length > 0)) && (
             <div className="atts">
               {f.attachments.map((a, i) => <span key={i}><Icon name="clip" size={12} /> {a.filename} <button style={{ padding: '0 4px' }} onClick={() => { setF(x => ({ ...x, attachments: x.attachments.filter((_, j) => j !== i) })); dirty.current = true; scheduleSave(); }}>✕</button></span>)}

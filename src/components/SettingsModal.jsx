@@ -52,6 +52,10 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
   const [sigEdit, setSigEdit] = useState(null);
   const [dbInfo, setDbInfo] = useState(null);
   const [contacts, setContacts] = useState(null);
+  const [snips, setSnips] = useState([]); const [snipEdit, setSnipEdit] = useState(null);
+  const [lock, setLock] = useState(null); const [lp, setLp] = useState({ cur: '', a: '', b: '' });
+  const [ach, setAch] = useState(null); const [exporting, setExporting] = useState(null);
+  useEffect(() => { window.mail.snippets.list().then(setSnips).catch(() => {}); window.mail.lock.status().then(setLock).catch(() => {}); window.mail.achievements.list().then(setAch).catch(() => {}); return window.mail.on('export:progress', ({ n }) => setExporting(n)); }, []);
   const [importing, setImporting] = useState(null);
   const loadContacts = () => window.mail.contacts.stats().then(setContacts).catch(() => {});
   useEffect(() => { loadContacts(); }, [accounts]);
@@ -76,7 +80,7 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
         <div className="mh">Settings<button className="x" onClick={onClose}>✕</button></div>
         <div className="mb">
           <div className="tabs">
-            {[['general', 'General'], ['accounts', 'Accounts'], ['rules', 'Rules'], ['google', 'Advanced']].map(([id, n]) => <button key={id} className={'tab' + (tab === id ? ' active' : '')} onClick={() => setTab(id)}>{n}</button>)}
+            {[['general', 'General'], ['accounts', 'Accounts'], ['rules', 'Rules'], ['snippets', 'Snippets'], ['security', 'Security & data'], ['google', 'Advanced']].map(([id, n]) => <button key={id} className={'tab' + (tab === id ? ' active' : '')} onClick={() => setTab(id)}>{n}</button>)}
           </div>
           {tab === 'general' && <>
             <div className="frow"><label>Appearance</label><div style={{ display: 'flex', gap: 4 }}>{[['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([v, n]) => <button key={v} className={s.prefs.theme === v || (!s.prefs.theme && v === 'system') ? 'primary' : ''} onClick={() => { pref('theme', v); window.mail.settings.set({ prefs: { theme: v } }); document.documentElement.dataset.theme = v === 'system' ? '' : v; document.documentElement.classList.toggle('dark', v === 'dark' || (v === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)); }}>{v === 'light' ? <Icon name="sun" size={12} /> : v === 'dark' ? <Icon name="moon" size={12} /> : null} {n}</button>)}</div></div>
@@ -124,6 +128,36 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
             {contacts && <p className="muted">Address book: {contacts.total.toLocaleString()} people ({contacts.google.toLocaleString()} from Google Contacts, the rest learned from your mail). Importing needs the <b>People API</b> enabled in the same Google Cloud project as the Gmail API.</p>}
             <p className="muted">Google accounts sign in through your browser; Tomail never sees the password. Other providers (Outlook, Yahoo, iCloud, Fastmail, your own domain…) connect over IMAP/SMTP, usually with an app password. "All Inboxes" merges every account.</p>
           </>}
+          {tab === 'snippets' && <div>
+            <p className="muted">Reusable text for the editor. Type <code>;trigger</code> then space in a message to expand it, or use the Snippets button in the toolbar. Placeholders: <code>{'{{firstName}}'}</code> (first recipient), <code>{'{{date}}'}</code>, <code>{'{{subject}}'}</code>, <code>{'{{me}}'}</code>.</p>
+            {snips.map(s => <div className="snip-row" key={s.id}><code>;{s.trigger}</code><span>{s.name}</span><span className="muted" style={{ whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>{s.bodyHtml.replace(/<[^>]+>/g, ' ').slice(0, 160)}</span><span><button onClick={() => setSnipEdit({ ...s })}>Edit</button> <button onClick={() => window.mail.snippets.remove(s.id).then(() => window.mail.snippets.list().then(setSnips))}>Delete</button></span></div>)}
+            {snipEdit ? <div className="rule" style={{ borderColor: 'var(--accent)' }}>
+              <div className="frow"><label>Trigger</label><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>;<input type="text" value={snipEdit.trigger} onChange={e => setSnipEdit({ ...snipEdit, trigger: e.target.value.replace(/\s/g, '') })} placeholder="thanks" /></div></div>
+              <div className="frow"><label>Name</label><input type="text" value={snipEdit.name} onChange={e => setSnipEdit({ ...snipEdit, name: e.target.value })} /></div>
+              <div className="frow"><label>Text</label><textarea rows={5} value={snipEdit.bodyHtml} onChange={e => setSnipEdit({ ...snipEdit, bodyHtml: e.target.value })} placeholder="Hi {{firstName}},&#10;&#10;Thanks for getting in touch…" /></div>
+              <div className="frow"><label></label><div><button className="primary" onClick={async () => { try { await window.mail.snippets.save({ ...snipEdit, bodyHtml: /<[a-z]/i.test(snipEdit.bodyHtml) ? snipEdit.bodyHtml : snipEdit.bodyHtml.replace(/\n/g, '<br>') }); setSnipEdit(null); setSnips(await window.mail.snippets.list()); toast('Snippet saved'); } catch (e) { toast(e.message, true); } }}>Save</button> <button onClick={() => setSnipEdit(null)}>Cancel</button></div></div>
+            </div> : <button className="primary" onClick={() => setSnipEdit({ trigger: '', name: '', bodyHtml: '' })}><Icon name="plus" size={12} /> New snippet</button>}
+          </div>}
+          {tab === 'security' && <div>
+            <h3 style={{ marginTop: 0 }}>App lock</h3>
+            <p className="muted">Require a passphrase to open Tomail and after it has been idle. This locks the window, not the database file: for the file itself use your operating system's disk encryption (BitLocker, FileVault, LUKS).</p>
+            {lock && <>
+              <div className="frow"><label>Status</label><span>{lock.enabled ? 'Enabled' : 'Off'}</span></div>
+              {lock.enabled && <div className="frow"><label>Current passphrase</label><input type="password" value={lp.cur} onChange={e => setLp({ ...lp, cur: e.target.value })} /></div>}
+              <div className="frow"><label>{lock.enabled ? 'New passphrase' : 'Passphrase'}</label><input type="password" value={lp.a} onChange={e => setLp({ ...lp, a: e.target.value })} placeholder={lock.enabled ? 'leave blank to turn off' : ''} /></div>
+              <div className="frow"><label>Repeat</label><input type="password" value={lp.b} onChange={e => setLp({ ...lp, b: e.target.value })} /></div>
+              <div className="frow"><label>Lock after idle</label><div><input type="number" min="0" style={{ width: 70 }} value={s.prefs.lockIdleMinutes ?? 10} onChange={e => pref('lockIdleMinutes', Number(e.target.value))} /> minutes (0 = only at startup)</div></div>
+              <div className="frow"><label></label><button className="primary" onClick={async () => { if (lp.a !== lp.b) { toast('Passphrases differ', true); return; } try { await window.mail.lock.set(lp.a, lp.cur); await window.mail.settings.set({ prefs: { lockIdleMinutes: s.prefs.lockIdleMinutes ?? 10 } }); setLock(await window.mail.lock.status()); setLp({ cur: '', a: '', b: '' }); toast(lp.a ? 'App lock enabled' : 'App lock turned off'); } catch (e) { toast(e.message, true); } }}>{lock.enabled ? (lp.a ? 'Change passphrase' : 'Turn off') : 'Enable'}</button></div>
+            </>}
+            <h3>Links</h3>
+            <div className="frow"><label>Clean links</label><label><input type="checkbox" checked={s.prefs.cleanLinks !== false} onChange={e => { pref('cleanLinks', e.target.checked); window.mail.settings.set({ prefs: { cleanLinks: e.target.checked } }); }} /> strip tracking parameters (utm_, fbclid, gclid…) and unwrap redirectors before opening links in your browser</label></div>
+            <h3>Export</h3>
+            <p className="muted">Save an account's mail as a standard <code>.mbox</code> file (readable by Thunderbird and most tools). Messages whose body hasn't been downloaded are exported with headers and preview only.</p>
+            {accounts.map(a => <div className="frow" key={a.id}><label>{a.email}</label><button disabled={exporting != null} onClick={async () => { setExporting(0); try { const r = await window.mail.exportMbox(a.id); if (r) toast(`Exported ${r.messages.toLocaleString()} messages (${r.withBody.toLocaleString()} with bodies) to ${r.file}`); } catch (e) { toast(e.message, true); } finally { setExporting(null); } }}>{exporting != null ? `Exporting… ${exporting.toLocaleString()}` : 'Export as .mbox'}</button></div>)}
+            <h3>Achievements</h3>
+            <div className="frow"><label>Show achievements</label><label><input type="checkbox" checked={s.prefs.achievements !== false} onChange={e => { pref('achievements', e.target.checked); window.mail.settings.set({ prefs: { achievements: e.target.checked } }); }} /> little toasts for milestones (inbox zero, 100 archived…)</label></div>
+            {ach && <div className="ach">{ach.all.map(a => <div key={a.id} className={ach.unlocked[a.id] ? '' : 'locked'}><b>{ach.unlocked[a.id] ? '🏆 ' : '🔒 '}{a.title}</b><small>{a.body}{ach.unlocked[a.id] ? ` · ${new Date(ach.unlocked[a.id]).toLocaleDateString('en-GB')}` : ''}</small></div>)}</div>}
+          </div>}
           {tab === 'rules' && <RulesTab accounts={accounts} labels={labels} toast={toast} seed={ruleSeed} />}
           {tab === 'google' && <>
             <p><b>Use your own Google API client (optional).</b> Tomail releases ship with a built-in Google sign-in{info?.hasGoogleClient ? ' (present in this build)' : ' — but this build has none, so you need your own'}. You only need this if you build Tomail yourself or prefer your own Google Cloud project:</p>

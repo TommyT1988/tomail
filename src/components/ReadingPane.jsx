@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { addrList, fmtAddr, fmtAddrFull, fmtFull, fmtRange, fmtSize, fmtTime, followUpPresets, fmtDuration, ago } from '../util.js';
 import { Dropdown, MI } from './Menus.jsx';
+import { analyse } from '../phishing.js';
 import Icon from './Icons.jsx';
 
 export function buildDoc(html, { allowRemote }) {
@@ -87,10 +88,10 @@ function AuthBadges({ auth }) {
   return <span className="auths">{b('spf', 'SPF')}{b('dkim', 'DKIM')}{b('dmarc', 'DMARC')}</span>;
 }
 /** Who is this sender, in numbers: history with them, how you deal with their mail, first-contact warning. */
-function SenderCard({ message, onOpenMessage, onRuleFromSender }) {
+function SenderCard({ message, onOpenMessage, onRuleFromSender, onInfo }) {
   const [info, setInfo] = useState(null);
   const [open, setOpen] = useState(() => localStorage.getItem('senderCard') !== '0');
-  useEffect(() => { let on = true; setInfo(null); if (message.fromEmail) window.mail.messages.senderInfo(message.fromEmail).then(i => on && setInfo(i)).catch(() => {}); return () => { on = false; }; }, [message.fromEmail, message.id]);
+  useEffect(() => { let on = true; setInfo(null); onInfo?.(null); if (message.fromEmail) window.mail.messages.senderInfo(message.fromEmail).then(i => { if (on) { setInfo(i); onInfo?.(i); } }).catch(() => {}); return () => { on = false; }; }, [message.fromEmail, message.id]); // eslint-disable-line
   if (!message.fromEmail || !info || info.isOwn) return null;
   const first = info.received <= 1 && info.sentTo === 0;
   const failed = message.auth && Object.values(message.auth).some(v => /fail/.test(v || ''));
@@ -122,6 +123,39 @@ function SenderCard({ message, onOpenMessage, onRuleFromSender }) {
           <div className="sactions"><button onClick={() => onRuleFromSender?.(message)}>Create rule for this sender</button><button onClick={() => window.mail.shell.openExternal('https://www.google.com/search?q=' + encodeURIComponent(message.fromEmail.split('@')[1]))}>Look up domain</button></div>
         </div>
       )}
+    </div>
+  );
+}
+function PhishingBanner({ message, senderInfo }) {
+  const r = useMemo(() => analyse({ ...message, senderFirstContact: senderInfo ? senderInfo.received <= 1 && senderInfo.sentTo === 0 : false }), [message.id, message.bodyHtml, senderInfo]);
+  if (r.level === 'none') return null;
+  return (
+    <div className={'phish ' + r.level}>
+      <div className="ph"><b>{r.level === 'danger' ? 'This message looks like phishing.' : 'Be careful with this message.'}</b> Don't click links or reply with passwords or payment details unless you're sure.</div>
+      <ul>{r.reasons.map((x, i) => <li key={i}>{x}</li>)}</ul>
+    </div>
+  );
+}
+/** Inline reply box under a message: plain text, sends with the original quoted. */
+function QuickReply({ message, toast, autoFocus }) {
+  const [text, setText] = useState('');
+  const [open, setOpen] = useState(!!autoFocus);
+  const [busy, setBusy] = useState(false);
+  const [all, setAll] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => { setText(''); setOpen(!!autoFocus); }, [message.id, autoFocus]);
+  useEffect(() => { if (open) ref.current?.focus(); }, [open]);
+  const sendIt = async () => {
+    if (!text.trim()) return; setBusy(true);
+    try { await window.mail.messages.quickReply(message.accountId, message.id, text, all); toast?.('Reply sent'); setText(''); setOpen(false); }
+    catch (e) { toast?.(e.message, true); } finally { setBusy(false); }
+  };
+  if (!open) return <div className="qr-closed"><button onClick={() => setOpen(true)}><Icon name="reply" size={12} /> Quick reply</button><button onClick={() => window.mail.compose.open({ mode: 'reply', accountId: message.accountId, originalId: message.id })}>Reply in a window</button></div>;
+  return (
+    <div className="qr">
+      <div className="qr-h"><span>Reply to <b>{message.fromName || message.fromEmail}</b>{(message.to?.length > 1 || message.cc?.length > 0) && <label style={{ marginLeft: 12 }}><input type="checkbox" checked={all} onChange={e => setAll(e.target.checked)} /> reply all</label>}</span><button onClick={() => window.mail.compose.open({ mode: all ? 'replyAll' : 'reply', accountId: message.accountId, originalId: message.id })}>Open in a window</button></div>
+      <textarea ref={ref} value={text} onChange={e => setText(e.target.value)} placeholder="Type a reply… (Ctrl+Enter to send)" onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendIt(); if (e.key === 'Escape') { setOpen(false); e.stopPropagation(); } }} />
+      <div className="qr-f"><button className="primary" onClick={sendIt} disabled={busy || !text.trim()}>{busy ? 'Sending…' : 'Send'}</button><button onClick={() => setOpen(false)}>Cancel</button><span className="muted">The original message is quoted below your reply.</span></div>
     </div>
   );
 }
@@ -183,8 +217,9 @@ function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo })
   );
 }
 
-export default function ReadingPane({ message, thread, loading, prefs, error, onRespond, onPrint, onReplyTo, onPopOut, onOpenMessage, onRuleFromSender, toast }) {
+export default function ReadingPane({ message, thread, loading, prefs, error, onRespond, onPrint, onReplyTo, onPopOut, onOpenMessage, onRuleFromSender, toast, quickReply }) {
   const [allow, setAllow] = useState({});
+  const [senderInfo, setSenderInfo] = useState(null);
   const [openIds, setOpenIds] = useState(new Set());
   useEffect(() => { if (thread?.length) setOpenIds(new Set([thread[thread.length - 1].id, ...thread.filter(m => m.unread).map(m => m.id)])); }, [thread?.map(m => m.id).join(',')]); // eslint-disable-line
   const allowRemote = !!(prefs?.loadRemoteImages || (message && allow[message.id]));
@@ -196,10 +231,12 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
       <div className="read">
         <div className="hdr"><h2>{latest.subject || message.subject || '(no subject)'}</h2><div className="line"><span className="muted">{thread.length} messages in this conversation</span>
           <span className="hbtns"><FollowUpMenu message={latest} toast={toast} />{onPopOut && <button onClick={() => onPopOut(latest)}><Icon name="external" size={12} /> Window</button>}<button onClick={() => setOpenIds(new Set(thread.map(m => m.id)))}>Expand all</button><button onClick={() => setOpenIds(new Set([latest.id]))}>Collapse</button></span></div></div>
-        <SenderCard message={latest} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} />
+        <SenderCard message={latest} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} onInfo={setSenderInfo} />
+        {latest.bodyFetched && <PhishingBanner message={latest} senderInfo={senderInfo} />}
         <div className="thread">
           {thread.map(m => <ThreadCard key={m.id} m={m.id === message.id ? message : m} open={openIds.has(m.id)} prefs={prefs} onRespond={onRespond} onPrint={onPrint} onReplyTo={onReplyTo}
             onToggle={() => setOpenIds(s => { const n = new Set(s); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })} />)}
+          {!latest.labels?.includes('SENT') && <QuickReply message={latest} toast={toast} autoFocus={quickReply} />}
         </div>
       </div>
     );
@@ -207,13 +244,15 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
   return (
     <div className="read">
       <Header message={message} onPrint={onPrint} onPopOut={onPopOut} toast={toast} />
-      <SenderCard message={message} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} />
+      <SenderCard message={message} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} onInfo={setSenderInfo} />
+      {message.bodyFetched && <PhishingBanner message={message} senderInfo={senderInfo} />}
       {message.calendar && <InviteCard m={message} onRespond={onRespond} />}
       <Attachments m={message} />
       {error && <div className="imgbar" style={{ background: '#fde8e6', borderColor: '#f3b5ae' }}>⚠ {error}</div>}
       {hasRemoteImages(message.bodyHtml) && !allowRemote && <div className="imgbar"><Icon name="image" size={13} /> Remote images are blocked in this message. <button onClick={() => setAllow(a => ({ ...a, [message.id]: true }))}>Load images</button></div>}
       {!message.bodyFetched && loading && <div className="plain muted">Downloading message…</div>}
       {message.bodyHtml ? <BodyFrame html={message.bodyHtml} allowRemote={allowRemote} /> : <div className="plain">{message.bodyText || (message.bodyFetched ? '' : message.snippet)}</div>}
+      {message.bodyFetched && !message.labels?.includes('SENT') && <QuickReply message={message} toast={toast} autoFocus={quickReply} />}
     </div>
   );
 }

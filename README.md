@@ -38,12 +38,17 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Remote images blocked by default with a per-message "Load images"; HTML rendered in a sandbox; links open in your browser
 - Attachment previews: inline image thumbnails, a viewer for images, PDFs and text
 - Calendar invitations show as a card with Accept / Maybe / Decline that replies to the organiser
+- **Sender card**: history with each sender, your typical reply time, first-contact and authentication (SPF/DKIM/DMARC) flags
+- **Phishing warnings**: look-alike domains, links whose text and destination differ, brand names on foreign addresses, urgent payment wording from strangers
+- **Quick reply** under every message (Ctrl+Enter to send), and inline reply from notifications on macOS
+- **Tabs**: Ctrl+click a folder or middle-click a message to open it in a tab; searches open in their own tab
 
 <p align="center"><img src="docs/screenshots/conversation-2.png" width="800" alt="Conversation view"></p>
 
 **Triage**
 - Read / unread, flag, archive, delete, move, junk, all instant and synced, with **Undo**
 - **Snooze** (later today, tomorrow, weekend, next week, or a time); the wake time is stored on the server so every device running Tomail wakes it
+- **Follow-up reminders**: "remind me if no reply by…" on anything you send; clears itself when they reply, nags you if they don't
 - **Rules**: file, label, archive, flag, read, junk or trash new mail by sender, recipient, subject, body or attachment; "Create rule from sender" in Quick Actions
 - Trash and Junk offer Restore, Delete forever and Empty folder
 - Sortable columns; drag accounts into your preferred order; right-click folders to rename, delete, colour or add subfolders
@@ -53,7 +58,8 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Rich text: bold, italic, underline, lists, quotes, links, pasted or inserted images
 - Address autocomplete from the people you write to and hear from, plus **Google Contacts** import (Settings → Accounts; asks for read-only contacts access once, refreshes daily)
 - Drafts auto-save and are mirrored to your provider's Drafts folder, so you can finish them elsewhere
-- Undo send: a countdown after pressing Send (default 5 s)
+- Undo send: a countdown after pressing Send (default 5 s); **Send later** at a chosen time, with a Scheduled view to change your mind
+- **Snippets**: reusable text that expands when you type `;trigger`, with `{{firstName}}` and other placeholders
 - Outbox: no connection? The message waits and goes out when you're back online
 - Per-account signatures
 
@@ -71,6 +77,9 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Dark mode (system, light or dark)
 - Automatic updates
 - Housekeeping: optionally keep downloaded bodies for 30 / 90 / 365 days; weekly database compaction
+- **App lock** with a passphrase (at startup and after idle) and **.mbox export** of any account
+- **Clean links**: tracking parameters stripped and redirectors unwrapped before a link opens in your browser
+- Achievements, if you like that sort of thing (switchable)
 - Something wrong? **Settings → Report a problem** opens a GitHub issue with the version and recent log attached (email addresses redacted)
 
 <p align="center"><img src="docs/screenshots/dark-2.png" width="800" alt="Dark mode"></p>
@@ -90,11 +99,12 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 | s | Flag / unflag |
 | p | Print |
 | Esc | Clear selection / close |
+| Ctrl+T / Ctrl+W | New tab / close tab |
 | ? | Show all shortcuts |
 
 ## Privacy
 
-Mail is stored only on your computer, in an SQLite database under the app's data folder (shown in Settings). Tomail talks to Google or your IMAP server directly; there is no Tomail server, no telemetry, and nothing is sent anywhere except the mail you send. Tracking pixels don't fire unless you load a message's images. "Report a problem" only opens a browser tab with text you can edit before submitting.
+Mail is stored only on your computer, in an SQLite database under the app's data folder (shown in Settings). The database file itself isn't encrypted (the bundled SQLite can't), so rely on your operating system's disk encryption; the app lock protects the window, not the file. Tomail talks to Google or your IMAP server directly; there is no Tomail server, no telemetry, and nothing is sent anywhere except the mail you send. Tracking pixels don't fire unless you load a message's images. "Report a problem" only opens a browser tab with text you can edit before submitting.
 
 ## Build it yourself
 

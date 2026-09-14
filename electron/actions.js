@@ -40,7 +40,7 @@ class Actions {
   }
   markRead(t, read = true) { return this.modify(t, read ? { remove: ['UNREAD'] } : { add: ['UNREAD'] }); }
   star(t, on = true) { return this.modify(t, on ? { add: ['STARRED'] } : { remove: ['STARRED'] }); }
-  archive(t) { return this.modify(t, { remove: ['INBOX'] }); }
+  archive(t) { this.db.bump('archived', t.length); return this.modify(t, { remove: ['INBOX'] }); }
   trash(t) { return this.modify(t, { add: ['TRASH'], remove: ['INBOX', 'SPAM'] }); }
   untrash(t) { return this.modify(t, { remove: ['TRASH', 'SPAM'], add: ['INBOX'] }); }
   spam(t, on = true) { return this.modify(t, on ? { add: ['SPAM'], remove: ['INBOX'] } : { remove: ['SPAM'], add: ['INBOX'] }); }
@@ -78,6 +78,7 @@ class Actions {
     return null;
   }
   async snooze(targets, until) {
+    this.db.bump('snoozed', targets.length);
     for (const [accountId, ids] of this.groupByAccount(targets)) {
       const label = await this.snoozeLabel(accountId);
       const marker = await this.untilMarker(accountId, until).catch(() => null);
@@ -179,6 +180,15 @@ class Actions {
       }
       throw e;
     }
+  }
+  async processScheduled() {
+    let sent = 0;
+    for (const item of this.db.dueScheduled(Date.now())) {
+      try { await this.send({ ...item.payload, draftId: undefined }); this.db.removeScheduled(item.id); sent++; }
+      catch (e) { if (e.code === 'OUTBOX') { this.db.removeScheduled(item.id); } else { this.log('scheduled send failed: ' + e.message); this.db.updateScheduled(item.id, Date.now() + 15 * 60000); } }
+    }
+    if (sent) this.onChange();
+    return sent;
   }
   async processOutbox() {
     const due = this.db.dueOutbox(Date.now());

@@ -71,6 +71,8 @@ function seedDemo(db) {
   db.upsertMessages(a2.id, m2);
   db.setBody(a2.id, 's1', { text: 'Hi, is the 14-inch model still available? Thanks', html: textToHtml('Hi, is the 14-inch model still available? Thanks'), attachments: [] });
   db.saveRule({ name: 'File courier updates', enabled: true, accountId: a1.id, match: 'any', conditions: [{ field: 'from', op: 'contains', value: 'parcelio.example' }, { field: 'subject', op: 'contains', value: 'collection' }], actions: [{ type: 'moveTo', labelId: L['Couriers'] }, { type: 'markRead' }] });
+  db.saveSnippet({ trigger: 'thanks', name: 'Thanks for your message', bodyHtml: 'Hi {{firstName}},<br><br>Thanks for getting in touch — I will come back to you shortly.<br><br>{{me}}' });
+  db.addScheduled(a1.id, { accountId: a1.id, to: 'jordan@example.org', subject: 'Follow-up on the quote', text: 'Hi Jordan…', html: '<p>Hi Jordan…</p>', mode: 'new' }, Date.now() + 86400000);
   db.updateAccount(a1.id, { initial_done: 1, history_id: '1', last_sync_at: Date.now() - 5 * 60000 });
   db.updateAccount(a2.id, { initial_done: 1, history_id: '1', last_sync_at: Date.now() - 5 * 60000 });
 }

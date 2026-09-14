@@ -138,3 +138,11 @@ export function followUpPresets() {
   return [{ label: 'Tomorrow', at: at(1) }, { label: 'Next working day', at: nextWorking() }, { label: 'In 3 days', at: at(3) }, { label: 'In a week', at: at(7) }, { label: 'In 2 weeks', at: at(14) }];
 }
 export function fmtDuration(ms) { if (ms == null) return ''; const h = ms / 3600000; if (h < 1) return `${Math.max(1, Math.round(ms / 60000))} min`; if (h < 48) return `${Math.round(h)} h`; return `${Math.round(h / 24)} days`; }
+
+export function sendLaterPresets() {
+  const at = (days, h) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(h, 0, 0, 0); return d.getTime(); };
+  const nextWorking = () => { const d = new Date(); do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6); d.setHours(9, 0, 0, 0); return d.getTime(); };
+  const now = new Date(); const later = new Date(now); later.setHours(now.getHours() < 13 ? 17 : now.getHours() + 3, 0, 0, 0);
+  const mon = new Date(now); mon.setDate(now.getDate() + ((1 - now.getDay() + 7) % 7 || 7)); mon.setHours(9, 0, 0, 0);
+  return [{ label: now.getHours() < 13 ? 'This afternoon (17:00)' : 'In 3 hours', at: later.getTime() }, { label: 'Tomorrow 9:00', at: at(1, 9) }, { label: 'Next working morning 9:00', at: nextWorking() }, { label: 'Monday 9:00', at: mon.getTime() }];
+}

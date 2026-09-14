@@ -4,7 +4,7 @@ import MessageList from './components/MessageList.jsx';
 import ReadingPane from './components/ReadingPane.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import { Dropdown, MI, MarkMenu, QuickActionsMenu, SnoozeMenu, FilterMenu } from './components/Menus.jsx';
-import { ago, gmailQuery, keyOf, sameView, parseSearch, followUpPresets } from './util.js';
+import { ago, gmailQuery, keyOf, sameView, parseSearch, followUpPresets, sendLaterPresets } from './util.js';
 import Icon from './components/Icons.jsx';
 
 const PAGE = 100;
@@ -46,6 +46,13 @@ export default function App() {
   const [sendState, setSendState] = useState(null);
   const [outbox, setOutbox] = useState([]);
   const [followups, setFollowups] = useState([]);
+  const [scheduled, setScheduled] = useState([]);
+  const [tabs, setTabs] = useState(() => { try { return JSON.parse(localStorage.getItem('tabs') || 'null') || [{ id: 1, view: HOME }]; } catch { return [{ id: 1, view: HOME }]; } });
+  const [activeTab, setActiveTab] = useState(() => Number(localStorage.getItem('activeTab')) || 1);
+  const [locked, setLocked] = useState(false);
+  const [lockInfo, setLockInfo] = useState(null);
+  const [quickReplyFocus, setQuickReplyFocus] = useState(false);
+  const lastActivity = useRef(Date.now());
   const [labelMenu, setLabelMenu] = useState(null);
   const [shortcuts, setShortcuts] = useState(false);
   const undoRef = useRef(null);
@@ -61,7 +68,14 @@ export default function App() {
 
   const toast = useCallback((m, err, undo) => { setToastMsg({ m, err, undo }); setTimeout(() => setToastMsg(t => (t?.m === m ? null : t)), err ? 6000 : undo ? 8000 : 2500); }, []);
   const labelsById = useMemo(() => { const o = {}; for (const [aid, ls] of Object.entries(labels)) o[aid] = Object.fromEntries(ls.map(l => [l.id, l])); return o; }, [labels]);
-  const setView = useCallback((v) => { setViewRaw(v); setSelected([]); setAnchor(null); setMessage(null); setThread(null); setMsgError(null); }, []);
+  const setView = useCallback((v) => { setViewRaw(v); setSelected([]); setAnchor(null); setMessage(null); setThread(null); setMsgError(null); setQuickReplyFocus(false); }, []);
+  useEffect(() => { setTabs(ts => ts.map(t => t.id === activeTab && t.kind !== 'message' ? { ...t, view } : t)); }, [view, activeTab]);
+  useEffect(() => { try { localStorage.setItem('tabs', JSON.stringify(tabs.map(t => ({ id: t.id, view: t.view, kind: t.kind, msg: t.msg, title: t.title })))); localStorage.setItem('activeTab', String(activeTab)); } catch {} }, [tabs, activeTab]);
+  const openTab = (v, opts = {}) => { const id = Date.now(); setTabs(ts => [...ts, { id, view: v, ...opts }]); setActiveTab(id); if (opts.kind !== 'message') setView(v); };
+  const switchTab = (t) => { setActiveTab(t.id); if (t.kind === 'message') { setViewRaw(t.view); setSelected([{ accountId: t.msg.accountId, id: t.msg.id }]); } else setView(t.view); };
+  const closeTab = (id) => { setTabs(ts => { const rest = ts.filter(t => t.id !== id); if (!rest.length) rest.push({ id: 1, view: HOME }); if (id === activeTab) { const nt = rest[rest.length - 1]; setTimeout(() => switchTab(nt), 0); } return rest; }); };
+  const tabTitle = (t) => t.kind === 'message' ? (t.title || 'Message') : viewTitleFor(t.view);
+  const viewTitleFor = (v) => ({ 'all-inboxes': 'Inbox', unread: 'Unread', starred: 'Flagged', snoozed: 'Snoozed', drafts: 'Drafts', outbox: 'Outbox', followups: 'Follow-ups', scheduled: 'Scheduled', all: 'All Mail', search: `Search: ${v.q}`, ids: `Deep: ${v.q}` })[v.kind] || (v.kind === 'label' ? ({ INBOX: 'Inbox', SENT: 'Sent', TRASH: 'Trash', SPAM: 'Junk', ARCHIVE: 'Archive' })[v.labelId] || labelsById[v.accountId]?.[v.labelId]?.name || v.labelId : 'Mail');
   const setThreaded = (v) => { setThreadedRaw(v); localStorage.setItem('threaded', v ? '1' : '0'); setSelected([]); setMessage(null); setThread(null); };
   const applyTheme = (t) => {
     const root = document.documentElement;
@@ -72,8 +86,8 @@ export default function App() {
 
   // ── loaders ──
   const loadMeta = useCallback(async () => {
-    const [accs, c, st, d, ob, fu] = await Promise.all([mail.accounts.list(), mail.messages.counts(), mail.sync.status(), mail.drafts.list(), mail.outbox.list(), mail.followups.list()]);
-    setAccounts(accs); setCounts(c); setStatus(st); setDrafts(d); setOutbox(ob); setFollowups(fu);
+    const [accs, c, st, d, ob, fu, sc] = await Promise.all([mail.accounts.list(), mail.messages.counts(), mail.sync.status(), mail.drafts.list(), mail.outbox.list(), mail.followups.list(), mail.scheduled.list()]);
+    setAccounts(accs); setCounts(c); setStatus(st); setDrafts(d); setOutbox(ob); setFollowups(fu); setScheduled(sc);
     const ls = {}; await Promise.all(accs.map(async a => { ls[a.id] = await mail.labels.list(a.id); })); setLabels(ls);
     const unread = c?.favourites?.inboxUnread || 0;
     mail.app.setBadge(unread, unread > 0 ? drawBadge(unread) : null).catch(() => {});
@@ -85,6 +99,7 @@ export default function App() {
   }, []);
   const loadList = useCallback(async (v, { append = false } = {}) => {
     if (v.kind === 'drafts') { const d = await mail.drafts.list(); setDrafts(d); const it = draftItems(v, d); setItems(it); setTotal(it.length); setHasMore(false); return; }
+    if (v.kind === 'scheduled') { const sc = await mail.scheduled.list(); setScheduled(sc); const it = sc.map(s => ({ accountId: s.accountId, id: 'sc:' + s.id, sched: s, isScheduled: true, subject: s.subject, toText: s.to, fromName: 'Scheduled', fromEmail: '', snippet: `sends ${new Date(s.sendAt).toLocaleString('en-GB')}`, date: s.sendAt, size: 0, labels: [], to: [], unread: false, starred: false })); setItems(it); setTotal(it.length); setHasMore(false); return; }
     if (v.kind === 'followups') { const fu = await mail.followups.list(); setFollowups(fu); const it = fu.map(f => ({ accountId: f.accountId, id: 'fu:' + f.id, followup: f, isFollowup: true, subject: f.subject, toText: f.to, fromName: f.status === 'due' ? 'No reply yet' : 'Waiting for reply', fromEmail: '', snippet: `sent ${new Date(f.createdAt).toLocaleDateString('en-GB')} · reminder ${new Date(f.dueAt).toLocaleDateString('en-GB')}`, date: f.dueAt, size: 0, labels: [], to: [], unread: f.status === 'due', starred: false })); setItems(it); setTotal(it.length); setHasMore(false); return; }
     if (v.kind === 'outbox') { const ob = await mail.outbox.list(); setOutbox(ob); const it = ob.map(o => ({ accountId: o.accountId, id: 'outbox:' + o.id, outboxId: o.id, isOutbox: true, subject: o.subject, toText: o.to, snippet: o.lastError || '', fromName: 'Outbox', fromEmail: '', date: o.createdAt, size: 0, labels: [], to: [], unread: false, starred: false })); setItems(it); setTotal(it.length); setHasMore(false); return; }
     setLoading(true);
@@ -106,19 +121,23 @@ export default function App() {
     const off1 = mail.on('mail:changed', () => { loadMeta(); loadList(viewRef.current); });
     const off2 = mail.on('sync:status', (s) => setStatus(s));
     const off3 = mail.on('app:update-ready', (u) => setUpdateReady(u));
-    const off4 = mail.on('app:open-message', ({ accountId, id }) => { setView(HOME); setTimeout(() => setSelected([{ accountId, id }]), 300); });
+    const off4 = mail.on('app:open-message', ({ accountId, id, quickReply }) => { setView(HOME); setTimeout(() => { setSelected([{ accountId, id }]); if (quickReply) setQuickReplyFocus(true); }, 300); });
+    const off7 = mail.on('achievements:unlocked', (list) => { for (const a of list) setTimeout(() => setToastMsg({ m: `🏆 ${a.title} — ${a.body}`, ach: true }), 0); setTimeout(() => setToastMsg(t => (t?.ach ? null : t)), 6000); });
+    mail.lock.status().then(s => { setLockInfo(s); if (s.enabled) setLocked(true); });
+    const act = () => { lastActivity.current = Date.now(); }; ['mousemove', 'keydown', 'mousedown'].forEach(ev => window.addEventListener(ev, act));
+    const idle = setInterval(() => { mail.lock.status().then(s => { setLockInfo(s); if (s.enabled && s.idleMinutes > 0 && Date.now() - lastActivity.current > s.idleMinutes * 60000) setLocked(true); }); }, 30000);
     const off6 = mail.on('app:open-followups', () => setView({ kind: 'followups' }));
     const off5 = mail.on('send:state', (s) => { if (s.state === 'pending' || s.state === 'sending') setSendState(s); else { setSendState(null); if (s.state === 'sent') toast('Message sent'); else if (s.state === 'outbox') toast(s.error); else if (s.state === 'failed') toast('Send failed: ' + s.error + (s.draftId ? ' — the draft is kept' : ''), true); } loadMeta(); });
     const mq = window.matchMedia('(prefers-color-scheme: dark)'); const onMq = () => { mail.settings.get().then(s => applyTheme(s.prefs.theme)); tick(x => x + 1); }; mq.addEventListener('change', onMq);
     const t = setInterval(() => tick(x => x + 1), 30000);
-    return () => { off1(); off2(); off3(); off4(); off5(); off6(); clearInterval(t); mq.removeEventListener('change', onMq); };
+    return () => { off1(); off2(); off3(); off4(); off5(); off6(); off7(); clearInterval(t); clearInterval(idle); mq.removeEventListener('change', onMq); };
   }, [loadMeta, loadList, setView]);
   useEffect(() => { if (!settingsOpen) mail.settings.get().then(s => { setPrefs(s.prefs); applyTheme(s.prefs.theme); }); }, [settingsOpen]);
 
   // ── open message / thread ──
   const openMessage = useCallback(async (m) => {
     if (!m) { setMessage(null); setThread(null); return; }
-    if (m.isDraft || m.isFollowup || m.isOutbox) { setMessage(null); setThread(null); return; }
+    if (m.isDraft || m.isFollowup || m.isOutbox || m.isScheduled) { setMessage(null); setThread(null); return; }
     setMsgError(null); setMsgLoading(true);
     setMessage({ ...m, bodyFetched: false }); setThread(null);
     try {
@@ -139,6 +158,7 @@ export default function App() {
 
   // ── selection ──
   const onSelect = useCallback((m, e) => {
+    if (e.button === 1 && !m.isDraft && !m.isOutbox && !m.isFollowup && !m.isScheduled) { e.preventDefault(); openTab(viewRef.current, { kind: 'message', msg: { accountId: m.accountId, id: m.id }, title: m.subject || '(no subject)' }); setTimeout(() => setSelected([{ accountId: m.accountId, id: m.id }]), 0); return; }
     const idx = itemsRef.current.findIndex(i => i.id === m.id && i.accountId === m.accountId);
     if (e.shiftKey && anchor != null) { const [a, b] = [Math.min(anchor, idx), Math.max(anchor, idx)]; setSelected(itemsRef.current.slice(a, b + 1).map(x => ({ accountId: x.accountId, id: x.id }))); }
     else if (e.ctrlKey || e.metaKey) { setSelected(sel => sel.some(s => keyOf(s) === keyOf(m)) ? sel.filter(s => keyOf(s) !== keyOf(m)) : [...sel, { accountId: m.accountId, id: m.id }]); setAnchor(idx); }
@@ -148,6 +168,7 @@ export default function App() {
   const curIndex = () => { const s = selected[selected.length - 1]; return s ? itemsRef.current.findIndex(i => i.id === s.id && i.accountId === s.accountId) : -1; };
   const openItem = async (m) => {
     if (!m) return;
+    if (m.isScheduled) { try { await mail.scheduled.sendNow(m.sched.id); toast('Sent'); loadList(view); loadMeta(); } catch (e) { toast(e.message, true); } return; }
     if (m.isFollowup) { const f = m.followup; if (f.messageId) { setView({ kind: 'all', accountId: f.accountId }); setTimeout(() => setSelected([{ accountId: f.accountId, id: f.messageId }]), 300); } return; }
     if (m.isOutbox) { try { await mail.outbox.sendNow(m.outboxId); toast('Sent'); loadList(view); } catch (e) { toast(e.message, true); } return; }
     if (!m.isDraft) { openCompose('reply', m); return; }   // double-click a message = reply
@@ -195,12 +216,14 @@ export default function App() {
     const filters = { ...(view.filters || {}), ...parsed.filters };
     const q = parsed.text;
     if (!raw && !deep) { setView({ ...HOME, filters: view.filters }); return; }
-    if (!deep) { setView(q ? { kind: 'search', q, filters } : { ...HOME, filters }); return; }
+    if (!deep) { const nv = q ? { kind: 'search', q, filters } : { ...HOME, filters }; if (q && !['search', 'ids'].includes(view.kind)) openTab(nv); else setView(nv); return; }
     setLoading(true);
-    mail.messages.deepSearch(gmailQuery(q, filters), filters?.accountId || null).then(ids => setView({ kind: 'ids', ids, q })).catch(e => toast(e.message, true)).finally(() => setLoading(false));
+    mail.messages.deepSearch(gmailQuery(q, filters), filters?.accountId || null).then(ids => { const nv = { kind: 'ids', ids, q }; if (!['search', 'ids'].includes(view.kind)) openTab(nv); else setView(nv); }).catch(e => toast(e.message, true)).finally(() => setLoading(false));
   };
   const onKey = (e) => {
     if (settingsOpen) return;
+    if ((e.ctrlKey || e.metaKey) && e.key === 't') { e.preventDefault(); openTab(HOME); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'w') { e.preventDefault(); if (tabs.length > 1) closeTab(activeTab); return; }
     const i = curIndex(); const k = e.key; const cur = itemsRef.current[i];
     if (k === 'ArrowDown') { e.preventDefault(); selectIndex(Math.min(itemsRef.current.length - 1, i + 1)); }
     else if (k === 'ArrowUp') { e.preventDefault(); selectIndex(Math.max(0, i - 1)); }
@@ -235,6 +258,7 @@ export default function App() {
   const draftCounts = useMemo(() => { const o = { all: drafts.local.length + drafts.remote.length }; for (const d of [...drafts.local, ...drafts.remote]) o[d.accountId] = (o[d.accountId] || 0) + 1; return o; }, [drafts]);
   const selLabels = labels[selected[0]?.accountId || view.accountId] || [];
 
+  if (locked) return <LockScreen onUnlock={() => { setLocked(false); lastActivity.current = Date.now(); }} />;
   return (
     <div className="app">
       <div className="topbar">
@@ -274,7 +298,7 @@ export default function App() {
         <button disabled={!hasSel} onClick={doTrash} title={inTrash ? 'Delete permanently' : 'Move to Trash'}><span className="ico"><Icon name="trash" /></span>{inTrash ? 'Delete forever' : 'Delete'}</button>
       </div>
       <div className={'body' + (sidebarOpen ? '' : ' nosidebar')}>
-        {sidebarOpen && <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} onReorder={(ids) => mail.accounts.reorder(ids).then(loadMeta)} outboxCount={outbox.length} followups={{ total: followups.length, due: followups.filter(f => f.status === 'due').length }} onLabelMenu={(e, accountId, l) => setLabelMenu({ x: e.clientX, y: e.clientY, accountId, label: l })} />}
+        {sidebarOpen && <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} onReorder={(ids) => mail.accounts.reorder(ids).then(loadMeta)} outboxCount={outbox.length} scheduledCount={scheduled.length} onOpenTab={(v) => openTab(v)} followups={{ total: followups.length, due: followups.filter(f => f.status === 'due').length }} onLabelMenu={(e, accountId, l) => setLabelMenu({ x: e.clientX, y: e.clientY, accountId, label: l })} />}
         <div className="main">
           {!accounts.length && info && !info.demo ? (
             <div className="onboard">
@@ -289,6 +313,7 @@ export default function App() {
             </div>
           ) : (
             <div className="split">
+              {tabs.length > 1 && <div className="vtabs">{tabs.map(t => <span key={t.id} className={'vt' + (t.id === activeTab ? ' on' : '')} onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); closeTab(t.id); } else if (e.button === 0) switchTab(t); }} title={tabTitle(t)}><Icon name={t.kind === 'message' ? 'mail' : 'folder'} size={11} /><span className="t">{tabTitle(t)}</span>{tabs.length > 1 && <button onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>✕</button>}</span>)}<button className="add" title="New tab (or Ctrl+click a folder / middle-click a message)" onClick={() => openTab(HOME)}>+</button></div>}
               <div className="list-wrap" style={{ height: listH }}>
                 {filterChips.length > 0 && <div className="chips"><Icon name="settings" size={12} /> {filterChips.map(([k, v]) => <span className="chip" key={k}>{k}{v ? `: ${v}` : ''}<button onClick={() => setFilters({ ...view.filters, [k]: undefined })}>✕</button></span>)}<button style={{ fontSize: 11 }} onClick={() => setFilters({})}>clear</button></div>}
                 <MessageList items={items} total={total} loading={loading} view={view} setView={setViewRaw} selected={selected} onSelect={onSelect}
@@ -297,7 +322,14 @@ export default function App() {
               </div>
               <div className="divider" onMouseDown={startDrag} />
               <div className="read-wrap">
-                {view.kind === 'followups' && selected.length === 1 ? (() => { const it = itemsRef.current.find(i => i.id === selected[0].id); const f = it?.followup; if (!f) return null; return (
+                {view.kind === 'scheduled' && selected.length === 1 ? (() => { const it = itemsRef.current.find(i => i.id === selected[0].id); const s = it?.sched; if (!s) return null; return (
+                  <div className="read"><div className="fu-detail"><h2>{s.subject || '(no subject)'}</h2><p>To <b>{s.to}</b> · sends <b>{new Date(s.sendAt).toLocaleString('en-GB')}</b></p>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button className="primary" onClick={() => openItem(it)}>Send now</button>
+                      <Dropdown label="Reschedule"><div className="mhead">Send at</div>{sendLaterPresets().map(p => <MI key={p.label} sub={new Date(p.at).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })} onClick={() => mail.scheduled.reschedule(s.id, p.at).then(() => { toast('Rescheduled'); loadList(view); })}>{p.label}</MI>)}</Dropdown>
+                      <button onClick={() => mail.scheduled.cancel(s.id).then(dId => { toast('Back in Drafts'); setSelected([]); loadList(view); loadMeta(); if (dId) mail.compose.open({ mode: 'new', accountId: s.accountId, draftId: dId }); })}>Cancel &amp; edit</button>
+                    </div></div></div>); })()
+                  : view.kind === 'followups' && selected.length === 1 ? (() => { const it = itemsRef.current.find(i => i.id === selected[0].id); const f = it?.followup; if (!f) return null; return (
                   <div className="read"><div className="fu-detail">
                     <h2>{f.subject || '(no subject)'}</h2>
                     <p>Sent to <b>{f.to}</b> on {new Date(f.createdAt).toLocaleString('en-GB')}. {f.status === 'due' ? <span style={{ color: '#c0392b', fontWeight: 600 }}>No reply by {new Date(f.dueAt).toLocaleDateString('en-GB')}.</span> : <>Reminder on {new Date(f.dueAt).toLocaleString('en-GB')} if nobody replies.</>}</p>
@@ -313,7 +345,7 @@ export default function App() {
                   : view.kind === 'drafts' && selected.length === 1 ? <div className="read"><div className="empty"><div className="big"><Icon name="edit" size={56} style={{ strokeWidth: 1 }} /></div><div><button className="primary" onClick={() => openItem(itemsRef.current.find(i => i.id === selected[0].id))}>Open draft</button> <button onClick={() => { const it = itemsRef.current.find(i => i.id === selected[0].id); if (it?.draftId) mail.drafts.remove(it.draftId).then(() => loadList(view)); else if (it?.remoteDraft) mail.actions.trash([{ accountId: it.accountId, id: it.id }]); }}>Delete</button></div></div></div>
                   : <ReadingPane message={message} thread={thread} loading={msgLoading} prefs={prefs} error={msgError}
                     onRespond={async (m, p) => { try { await mail.actions.respondInvite(m.accountId, m.id, p); toast('Reply sent to the organiser'); const full = await mail.messages.get(m.accountId, m.id); setMessage(cur => cur?.id === m.id ? full : cur); } catch (e) { toast(e.message, true); } }}
-                    onPrint={(m) => mail.messages.print(m.accountId, m.id).catch(e => toast(e.message, true))} onReplyTo={(m, mode) => openCompose(mode, m)} onPopOut={(m) => mail.messages.openWindow(m.accountId, m.id)} toast={toast}
+                    onPrint={(m) => mail.messages.print(m.accountId, m.id).catch(e => toast(e.message, true))} onReplyTo={(m, mode) => openCompose(mode, m)} onPopOut={(m) => mail.messages.openWindow(m.accountId, m.id)} toast={toast} quickReply={quickReplyFocus}
                     onOpenMessage={(r) => { setView({ kind: 'all', accountId: r.accountId }); setTimeout(() => setSelected([{ accountId: r.accountId, id: r.id }]), 300); }}
                     onRuleFromSender={(m) => { setRuleSeed({ accountId: m.accountId, name: `From ${m.fromName || m.fromEmail}`, conditions: [{ field: 'from', op: 'contains', value: m.fromEmail }], actions: [{ type: 'moveTo', labelId: '' }] }); setSettingsOpen('rules'); }} />}
               </div>
@@ -331,7 +363,7 @@ export default function App() {
         <button onClick={() => { mail.sync.now(); }} disabled={!accounts.length || info?.demo}><Icon name="refresh" size={12} /> Sync now</button>
       </div>
       {settingsOpen && <SettingsModal onClose={() => { setSettingsOpen(false); setRuleSeed(null); }} accounts={accounts} labels={labels} ruleSeed={ruleSeed} refreshAccounts={loadMeta} toast={toast} info={info} initialTab={typeof settingsOpen === 'string' ? settingsOpen : undefined} />}
-      {toastMsg && <div className={'toast' + (toastMsg.err ? ' err' : '')}>{toastMsg.m}{toastMsg.undo && <button onClick={() => { const u = toastMsg.undo; setToastMsg(null); u(); }}>Undo</button>}</div>}
+      {toastMsg && <div className={'toast' + (toastMsg.err ? ' err' : '') + (toastMsg.ach ? ' ach-toast' : '')}>{toastMsg.m}{toastMsg.undo && <button onClick={() => { const u = toastMsg.undo; setToastMsg(null); u(); }}>Undo</button>}</div>}
       {sendState && <SendBanner s={sendState} onUndo={async () => { const ok = await mail.send.cancel(sendState.id); setSendState(null); if (ok && sendState.draftId) mail.compose.open({ mode: 'new', accountId: sendState.accountId, draftId: sendState.draftId }); }} />}
       {labelMenu && <LabelMenu m={labelMenu} labels={labels[labelMenu.accountId] || []} account={accounts.find(a => a.id === labelMenu.accountId)} onClose={() => setLabelMenu(null)} toast={toast} refresh={loadMeta} setView={setView} view={view} />}
       {shortcuts && <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setShortcuts(false); }}><div className="modal" style={{ width: 640 }}><div className="mh">Keyboard shortcuts<button className="x" onClick={() => setShortcuts(false)}>✕</button></div><div className="mb"><div className="shortcuts">
@@ -341,6 +373,11 @@ export default function App() {
   );
 }
 
+function LockScreen({ onUnlock }) {
+  const [p, setP] = useState(''); const [err, setErr] = useState('');
+  const go = async () => { if (await mail.lock.verify(p)) onUnlock(); else { setErr('Wrong passphrase'); setP(''); } };
+  return <div className="lockscreen"><div className="box"><Icon name="mail" size={40} /><h2>Tomail is locked</h2><input type="password" value={p} onChange={e => setP(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} placeholder="Passphrase" autoFocus /><p><button className="primary" onClick={go}>Unlock</button></p>{err && <div className="err">{err}</div>}</div></div>;
+}
 function SendBanner({ s, onUndo }) {
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick(x => x + 1), 500); return () => clearInterval(t); }, []);

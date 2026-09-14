@@ -315,3 +315,27 @@ a { color: var(--accent); }
 .sender .sactions { display: flex; gap: 6px; margin-top: 6px; } .sender .sactions button { font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); }
 .fu-detail { padding: 24px 32px; line-height: 1.6; } .fu-detail h2 { margin-top: 0; }
 .compose .dd button.on { background: var(--accent-bg); color: var(--accent); }
+
+/* ── tabs, quick reply, phishing, lock, achievements ── */
+.vtabs { display: flex; align-items: flex-end; gap: 2px; padding: 4px 8px 0; background: var(--bg); border-bottom: 1px solid var(--border); overflow-x: auto; }
+.vtabs .vt { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border); border-bottom: 0; border-radius: 6px 6px 0 0; background: #ececec; color: var(--muted); font-size: 12px; cursor: default; max-width: 220px; white-space: nowrap; }
+.vtabs .vt span.t { overflow: hidden; text-overflow: ellipsis; }
+.vtabs .vt.on { background: var(--panel); color: var(--text); font-weight: 600; margin-bottom: -1px; padding-bottom: 5px; }
+.vtabs .vt button { padding: 0 3px; font-size: 11px; color: var(--muted); } .vtabs .vt button:hover { color: var(--danger); background: transparent; }
+.vtabs .add { padding: 2px 8px; color: var(--muted); }
+:root.dark .vtabs .vt { background: #2b2c31; }
+.qr { border-top: 1px solid var(--border); padding: 8px 16px 10px; background: #fbfbfb; } :root.dark .qr { background: var(--panel); }
+.qr-closed { border-top: 1px solid var(--border); padding: 6px 16px; display: flex; gap: 6px; background: #fbfbfb; } :root.dark .qr-closed { background: var(--panel); }
+.qr .qr-h { display: flex; align-items: center; font-size: 12px; margin-bottom: 6px; } .qr .qr-h button { margin-left: auto; font-size: 12px; }
+.qr textarea { width: 100%; height: 90px; resize: vertical; padding: 8px; } .qr .qr-f { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 12px; }
+.phish { margin: 8px 16px; border-radius: 8px; padding: 8px 14px; font-size: 13px; }
+.phish.warn { background: #fff8e1; border: 1px solid #f0d98a; color: #4a3a00; } .phish.danger { background: #fde8e6; border: 1px solid #f3b5ae; color: #7a1d14; }
+:root.dark .phish.warn { background: #3d3520; border-color: #6b5b26; color: #f1e6c8; } :root.dark .phish.danger { background: #4a2622; border-color: #7a3a33; color: #f8d0cb; }
+.phish ul { margin: 4px 0 0; padding-left: 18px; }
+.lockscreen { position: fixed; inset: 0; background: var(--bg); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.lockscreen .box { width: 340px; text-align: center; } .lockscreen input { width: 100%; font-size: 16px; padding: 8px; text-align: center; }
+.lockscreen .err { color: var(--danger); margin-top: 8px; }
+.ach { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .ach div { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; } .ach div.locked { opacity: .45; }
+.ach b { display: block; } .ach small { color: var(--muted); }
+.toast.ach-toast { background: #2f6fcb; }
+.snip-row { display: grid; grid-template-columns: 120px 160px 1fr auto; gap: 6px; align-items: start; margin-bottom: 6px; }

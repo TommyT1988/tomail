@@ -144,6 +144,21 @@ CREATE TABLE IF NOT EXISTS followups (
   status TEXT NOT NULL DEFAULT 'waiting',
   replied_by TEXT, replied_at INTEGER, notified INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS scheduled (
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  subject TEXT, to_text TEXT,
+  send_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS snippets (
+  id INTEGER PRIMARY KEY,
+  trigger TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  body_html TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY,
   account_id INTEGER NOT NULL,
@@ -332,6 +347,40 @@ class MailDb {
     const contact = this.prep('SELECT name, source FROM contacts WHERE email = ?').get(e);
     return { email: e, received: recv.n, firstSeen: recv.first, lastSeen: recv.last, attachments: recv.atts || 0, unread: recv.unread || 0, sentTo: sent.n, lastSentAt: sent.last,
       repliedCount: pairs.length, avgReplyMs, labels: labels.map(x => x.l), spam, inContacts: !!contact, contactSource: contact?.source || null, isOwn: own.has(e), recent };
+  }
+  // ── scheduled sends ──
+  addScheduled(accountId, payload, sendAt) { const r = this.prep('INSERT INTO scheduled (account_id, payload_json, subject, to_text, send_at, created_at) VALUES (?,?,?,?,?,?)').run(accountId, JSON.stringify(payload), payload.subject || '', payload.to || '', sendAt, Date.now()); return Number(r.lastInsertRowid); }
+  listScheduled() { return this.prep('SELECT id, account_id, subject, to_text, send_at, created_at FROM scheduled ORDER BY send_at').all().map(r => ({ id: r.id, accountId: r.account_id, subject: r.subject, to: r.to_text, sendAt: r.send_at, createdAt: r.created_at })); }
+  getScheduled(id) { const r = this.prep('SELECT * FROM scheduled WHERE id = ?').get(id); return r ? { ...r, payload: JSON.parse(r.payload_json) } : null; }
+  dueScheduled(now) { return this.prep('SELECT * FROM scheduled WHERE send_at <= ? ORDER BY send_at').all(now).map(r => ({ ...r, payload: JSON.parse(r.payload_json) })); }
+  updateScheduled(id, sendAt) { this.prep('UPDATE scheduled SET send_at = ? WHERE id = ?').run(sendAt, id); }
+  removeScheduled(id) { this.prep('DELETE FROM scheduled WHERE id = ?').run(id); }
+  // ── snippets ──
+  listSnippets() { return this.prep('SELECT * FROM snippets ORDER BY trigger').all().map(r => ({ id: r.id, trigger: r.trigger, name: r.name, bodyHtml: r.body_html })); }
+  saveSnippet(s) {
+    const trig = String(s.trigger || '').trim().replace(/^;/, '');
+    if (!trig) throw new Error('A trigger is required');
+    if (s.id) { this.prep('UPDATE snippets SET trigger = ?, name = ?, body_html = ? WHERE id = ?').run(trig, s.name || trig, s.bodyHtml || '', s.id); return s.id; }
+    return Number(this.prep('INSERT INTO snippets (trigger, name, body_html, created_at) VALUES (?,?,?,?)').run(trig, s.name || trig, s.bodyHtml || '', Date.now()).lastInsertRowid);
+  }
+  deleteSnippet(id) { this.prep('DELETE FROM snippets WHERE id = ?').run(id); }
+  // ── stats for achievements ──
+  activity() {
+    const now = Date.now(), week = now - 7 * 86400000, day = new Date(); day.setHours(0, 0, 0, 0);
+    const sentWeek = this.prep(`SELECT count(*) AS n FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id AND ml.label_id = 'SENT' WHERE m.internal_date > ?`).get(week).n;
+    const sentTotal = this.prep(`SELECT count(*) AS n FROM message_labels WHERE label_id = 'SENT'`).get().n;
+    const inboxUnread = this.prep(`SELECT count(*) AS n FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id AND ml.label_id = 'INBOX' WHERE m.unread = 1 AND m.snooze_until IS NULL`).get().n;
+    const inboxTotal = this.prep(`SELECT count(*) AS n FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id AND ml.label_id = 'INBOX' WHERE m.snooze_until IS NULL`).get().n;
+    const rules = this.prep('SELECT count(*) AS n FROM rules WHERE enabled = 1').get().n;
+    const earliest = this.prep(`SELECT min(strftime('%H', internal_date/1000, 'unixepoch', 'localtime')) AS h FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id AND ml.label_id = 'SENT' WHERE m.internal_date > ?`).get(week).h;
+    const latest = this.prep(`SELECT max(strftime('%H', internal_date/1000, 'unixepoch', 'localtime')) AS h FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id AND ml.label_id = 'SENT' WHERE m.internal_date > ?`).get(week).h;
+    return { sentWeek, sentTotal, inboxUnread, inboxTotal, rules, earliestSentHour: earliest == null ? null : Number(earliest), latestSentHour: latest == null ? null : Number(latest), archivedTotal: this.kvGet('stat:archived') || 0, snoozedTotal: this.kvGet('stat:snoozed') || 0, followupsDone: this.kvGet('stat:followups') || 0 };
+  }
+  bump(key, n = 1) { this.kvSet('stat:' + key, (this.kvGet('stat:' + key) || 0) + n); }
+  /** Iterate messages (with bodies where cached) for export. */
+  *iterateForExport(accountId) {
+    const st = this.prep('SELECT * FROM messages WHERE account_id = ? ORDER BY internal_date');
+    for (const r of st.iterate(accountId)) yield rowToMessage(r);
   }
   // ── outbox (messages waiting for a connection) ──
   enqueueOutbox(accountId, payload, err) {
