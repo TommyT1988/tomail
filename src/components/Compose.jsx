@@ -5,7 +5,8 @@ import RichEditor from './RichEditor.jsx';
 import Icon from './Icons.jsx';
 import AddressInput from './AddressInput.jsx';
 import { Dropdown, MI } from './Menus.jsx';
-import { followUpPresets, sendLaterPresets, htmlToText as h2t } from '../util.js';
+import { followUpPresets, sendLaterPresets, htmlToText as h2t, escapeHtml as esc } from '../util.js';
+import { useAiStream } from '../useAi.js';
 
 /** draft: { mode:'new'|'reply'|'replyAll'|'forward', accountId, original?, draftId?, to?, subject? } */
 export default function Compose({ draft, accounts, prefs, onClose, toast, standalone = false }) {
@@ -34,6 +35,13 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
   const [saveState, setSaveState] = useState('');
   const [followUpAt, setFollowUpAt] = useState(null);
   const [snippets, setSnippets] = useState([]);
+  const [aiOn, setAiOn] = useState(false); const [aiPrompt, setAiPrompt] = useState(null);
+  const ai = useAiStream();
+  useEffect(() => { window.mail.settings.get().then(s => setAiOn(!!s.prefs.ai?.enabled)); }, []);
+  const bodyOnly = () => { const s = sigHtml(acct); return s && f.html.endsWith(s) ? f.html.slice(0, -s.length) : f.html; };
+  const putBody = (text) => { const s = sigHtml(acct); const html = `<div style="white-space:pre-wrap">${esc(text.trim())}</div>` + (s || ''); setF(x => ({ ...x, html })); dirty.current = true; scheduleSave(); };
+  const aiDraft = async (instruction) => { setAiPrompt(null); const out = await ai.run((id) => window.mail.ai.draft(id, { accountId, originalId: orig?.id && draft.mode !== 'forward' ? orig.id : null, instruction, mode: orig && draft.mode !== 'forward' ? 'reply' : 'new' })); if (out) putBody(out); };
+  const aiRewrite = async (mode) => { const text = h2t(bodyOnly()); if (!text.trim()) { toast('Write something first', true); return; } const out = await ai.run((id) => window.mail.ai.rewrite(id, text, mode)); if (out) putBody(out); };
   useEffect(() => { const load = () => window.mail.snippets.list().then(setSnippets).catch(() => {}); load(); return window.mail.on('snippets:changed', load); }, []);
   const firstName = () => { const t = f.to.split(',')[0] || ''; const n = /^"?([^"<]+?)"?\s*</.exec(t)?.[1] || ''; return n.split(' ')[0] || ''; };
   const sendLater = async (at) => {
@@ -106,6 +114,19 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
             </Dropdown>
             <button onClick={pick} disabled={sending}><Icon name="clip" /> Attach</button>
             <button onClick={save} disabled={sending}>Save draft</button>
+            {aiOn && <Dropdown title="Local AI (runs on this computer)" label={<>✨ {ai.busy ? 'Writing…' : 'AI'}</>} disabled={ai.busy}>
+              <div className="mhead">Write</div>
+              {orig && draft.mode !== 'forward' && <MI onClick={() => aiDraft('')}>Draft a reply to this email</MI>}
+              <MI onClick={() => setAiPrompt('')}>Write from an instruction…</MI>
+              <div className="msep" /><div className="mhead">Rewrite what I wrote</div>
+              <MI onClick={() => aiRewrite('grammar')}>Fix spelling &amp; grammar</MI>
+              <MI onClick={() => aiRewrite('shorter')}>Make it shorter</MI>
+              <MI onClick={() => aiRewrite('formal')}>More formal</MI>
+              <MI onClick={() => aiRewrite('friendly')}>Friendlier</MI>
+              <MI onClick={() => aiRewrite('bullets')}>As bullet points</MI>
+              <MI onClick={() => aiRewrite('english')}>Translate to English</MI>
+            </Dropdown>}
+            {ai.busy && <button onClick={ai.cancel}>Stop</button>}
             <Dropdown title="Remind me if nobody replies by…" btnClass={followUpAt ? 'on' : ''} label={<><Icon name="clock" /> {followUpAt ? `Follow up ${new Date(followUpAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : 'Remind me'}</>}>
               <div className="mhead">Remind me if no reply by</div>
               {followUpPresets().map(p => <MI key={p.label} sub={new Date(p.at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} onClick={() => setFollowUpAt(p.at)}>{p.label}</MI>)}
@@ -126,6 +147,9 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
             {!showCc && <button className="ccbcc" onClick={() => setShowCc(true)}>Cc/Bcc</button>}</div></div>
           {showCc && <><div className="field"><label>Cc</label><AddressInput value={f.cc} onChange={v => set('cc')({ target: { value: v } })} /></div><div className="field"><label>Bcc</label><AddressInput value={f.bcc} onChange={v => set('bcc')({ target: { value: v } })} /></div></>}
           <div className="field"><label>Subject</label><input type="text" value={f.subject} onChange={set('subject')} /></div>
+          {aiPrompt !== null && <div className="aiprompt"><input type="text" autoFocus value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder={orig ? 'e.g. "say yes but ask for a 10% discount and delivery by Friday"' : 'e.g. "ask Jordan for the invoice for last month\'s order"'} onKeyDown={e => { if (e.key === 'Enter' && aiPrompt.trim()) aiDraft(aiPrompt.trim()); if (e.key === 'Escape') setAiPrompt(null); }} /><button className="primary" onClick={() => aiPrompt.trim() && aiDraft(aiPrompt.trim())}>Write</button><button onClick={() => setAiPrompt(null)}>Cancel</button></div>}
+          {ai.error && <div className="aierr">{ai.error}</div>}
+          {ai.busy && ai.text && <div className="aistream">{ai.text}</div>}
           <RichEditor value={f.html} onChange={(h) => { setF(x => ({ ...x, html: h })); dirty.current = true; scheduleSave(); }} autoFocus={draft.mode === 'reply' || draft.mode === 'replyAll'} snippets={snippets} vars={{ firstName: firstName(), name: firstName(), date: new Date().toLocaleDateString('en-GB'), subject: f.subject, me: acct?.display_name || acct?.email || '' }} />
           {(f.attachments.length > 0 || (draft.mode === 'forward' && orig?.attachments?.length > 0)) && (
             <div className="atts">

@@ -65,6 +65,14 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 
 <p align="center"><img src="docs/screenshots/compose-2.png" width="700" alt="Compose window"></p>
 
+**✨ Local AI (optional)**
+- Install [Ollama](https://ollama.com/download), then Settings → AI: pick or download a model (2–5 GB) and switch it on. Everything runs on your own computer; nothing is sent anywhere.
+- Summarise a message or a whole conversation; three suggested one-line replies that drop into the quick reply box
+- Draft a reply, or write from an instruction, in your own tone (it looks at a few of your recent sent messages, switchable)
+- Rewrite what you wrote: fix grammar, shorter, more formal, friendlier, bullet points, translate to English
+- Describe a rule in a sentence and Tomail builds it
+- Any OpenAI-compatible local server (LM Studio, llama.cpp, Jan) works too, under Advanced
+
 **Search**
 - Instant local search across subject, sender, recipients and downloaded bodies
 - Operators: `from:` `to:` `subject:` `in:folder` `is:unread` `is:flagged` `has:attachment` `after:2026-01-01` `before:2026-02-01`, plus a Filters menu

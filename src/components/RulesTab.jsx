@@ -10,6 +10,16 @@ export default function RulesTab({ accounts, labels, toast, seed }) {
   const [rules, setRules] = useState([]);
   const [edit, setEdit] = useState(seed ? blank(seed.accountId, seed) : null);
   const [running, setRunning] = useState(false);
+  const [desc, setDesc] = useState(''); const [gen, setGen] = useState(false); const [aiOn, setAiOn] = useState(false);
+  useEffect(() => { window.mail.settings.get().then(s => setAiOn(!!s.prefs.ai?.enabled)); }, []);
+  const generate = async () => {
+    if (!desc.trim()) return; setGen(true);
+    try { const r = await window.mail.ai.rule('rule' + Date.now(), desc.trim(), accounts.length === 1 ? accounts[0].id : null);
+      const acts = r.actions.map(a => (a.labelId && String(a.labelId).startsWith('NEW:')) ? { ...a, labelId: '', newFolder: a.labelId.slice(4) } : a);
+      setEdit({ ...blank(accounts.length === 1 ? accounts[0].id : null), name: r.name, match: r.match, conditions: r.conditions, actions: acts });
+      const nf = acts.find(a => a.newFolder); if (nf) toast(`The folder "${nf.newFolder}" doesn't exist yet — create it, then pick it in the rule`, true); }
+    catch (e) { toast('Could not turn that into a rule: ' + e.message, true); } finally { setGen(false); }
+  };
   const load = () => window.mail.rules.list().then(setRules);
   useEffect(() => { load(); }, []);
   const save = async () => {
@@ -31,6 +41,7 @@ export default function RulesTab({ accounts, labels, toast, seed }) {
   return (
     <div className="rules">
       <p className="muted">Rules run on every new message as it arrives (not on Sent, Trash or Junk). Order matters: the first matching rule with "Stop processing" ends the run.</p>
+      {aiOn && <div className="cond" style={{ marginBottom: 10 }}><input type="text" value={desc} onChange={e => setDesc(e.target.value)} placeholder='✨ Describe a rule, e.g. "move receipts from Amazon into Finance and mark them read"' onKeyDown={e => e.key === 'Enter' && generate()} /><button className="primary" onClick={generate} disabled={gen || !desc.trim()}>{gen ? 'Thinking…' : 'Make rule'}</button></div>}
       {rules.map(r => (
         <div className="rule" key={r.id}>
           <div className="rh"><input type="checkbox" checked={r.enabled} onChange={() => toggle(r)} title="Enabled" /><span className="nm" style={{ opacity: r.enabled ? 1 : .5 }}>{r.name}</span>

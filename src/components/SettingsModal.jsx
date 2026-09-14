@@ -55,6 +55,12 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
   const [snips, setSnips] = useState([]); const [snipEdit, setSnipEdit] = useState(null);
   const [lock, setLock] = useState(null); const [lp, setLp] = useState({ cur: '', a: '', b: '' });
   const [ach, setAch] = useState(null); const [exporting, setExporting] = useState(null);
+  const [aiSt, setAiSt] = useState(null); const [rec, setRec] = useState([]); const [pull, setPull] = useState(null);
+  const aiCfg = { enabled: false, kind: 'ollama', endpoint: 'http://localhost:11434', model: 'llama3.2:3b', apiKey: '', styleLearning: true, ...(s?.prefs?.ai || {}) };
+  const setAi = (patch) => setS({ ...s, prefs: { ...s.prefs, ai: { ...aiCfg, ...patch } } });
+  const refreshAi = () => window.mail.ai.status().then(setAiSt).catch(() => {});
+  useEffect(() => { refreshAi(); window.mail.ai.recommended().then(setRec).catch(() => {}); return window.mail.on('ai:pull-progress', setPull); }, []);
+  const pullModel = async (m) => { setPull({ status: 'starting' }); try { await window.mail.settings.set({ prefs: { ai: aiCfg } }); await window.mail.ai.pull(m); toast(`Downloaded ${m}`); setAi({ model: m }); await window.mail.settings.set({ prefs: { ai: { ...aiCfg, model: m } } }); refreshAi(); } catch (e) { toast(e.message, true); } finally { setPull(null); } };
   useEffect(() => { window.mail.snippets.list().then(setSnips).catch(() => {}); window.mail.lock.status().then(setLock).catch(() => {}); window.mail.achievements.list().then(setAch).catch(() => {}); return window.mail.on('export:progress', ({ n }) => setExporting(n)); }, []);
   const [importing, setImporting] = useState(null);
   const loadContacts = () => window.mail.contacts.stats().then(setContacts).catch(() => {});
@@ -80,7 +86,7 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
         <div className="mh">Settings<button className="x" onClick={onClose}>✕</button></div>
         <div className="mb">
           <div className="tabs">
-            {[['general', 'General'], ['accounts', 'Accounts'], ['rules', 'Rules'], ['snippets', 'Snippets'], ['security', 'Security & data'], ['google', 'Advanced']].map(([id, n]) => <button key={id} className={'tab' + (tab === id ? ' active' : '')} onClick={() => setTab(id)}>{n}</button>)}
+            {[['general', 'General'], ['accounts', 'Accounts'], ['rules', 'Rules'], ['snippets', 'Snippets'], ['ai', '✨ AI'], ['security', 'Security & data'], ['google', 'Advanced']].map(([id, n]) => <button key={id} className={'tab' + (tab === id ? ' active' : '')} onClick={() => setTab(id)}>{n}</button>)}
           </div>
           {tab === 'general' && <>
             <div className="frow"><label>Appearance</label><div style={{ display: 'flex', gap: 4 }}>{[['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([v, n]) => <button key={v} className={s.prefs.theme === v || (!s.prefs.theme && v === 'system') ? 'primary' : ''} onClick={() => { pref('theme', v); window.mail.settings.set({ prefs: { theme: v } }); document.documentElement.dataset.theme = v === 'system' ? '' : v; document.documentElement.classList.toggle('dark', v === 'dark' || (v === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)); }}>{v === 'light' ? <Icon name="sun" size={12} /> : v === 'dark' ? <Icon name="moon" size={12} /> : null} {n}</button>)}</div></div>
@@ -128,6 +134,24 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
             {contacts && <p className="muted">Address book: {contacts.total.toLocaleString()} people ({contacts.google.toLocaleString()} from Google Contacts, the rest learned from your mail). Importing needs the <b>People API</b> enabled in the same Google Cloud project as the Gmail API.</p>}
             <p className="muted">Google accounts sign in through your browser; Tomail never sees the password. Other providers (Outlook, Yahoo, iCloud, Fastmail, your own domain…) connect over IMAP/SMTP, usually with an app password. "All Inboxes" merges every account.</p>
           </>}
+          {tab === 'ai' && <div>
+            <p>Summaries, reply suggestions, drafting in your own tone, rewriting and rules-from-a-sentence, all running <b>on this computer</b>. Nothing is sent to Tomail or anyone else. It uses <a href="#" onClick={e => { e.preventDefault(); window.mail.shell.openExternal('https://ollama.com/download'); }}>Ollama</a>, a free app that runs language models locally; install it, then pick a model below.</p>
+            <div className="frow"><label>Enable AI features</label><label><input type="checkbox" checked={!!aiCfg.enabled} onChange={e => { setAi({ enabled: e.target.checked }); window.mail.settings.set({ prefs: { ai: { ...aiCfg, enabled: e.target.checked } } }); }} /> show ✨ buttons in messages, compose and rules</label></div>
+            <div className="frow"><label>Status</label><div>{aiSt ? (aiSt.reachable ? <span style={{ color: '#1f7a33' }}>✓ Connected · {aiSt.models.length} model{aiSt.models.length === 1 ? '' : 's'} available</span> : <span style={{ color: '#c0392b' }}>✗ Not reachable at {aiCfg.endpoint} ({aiSt.error}). Is Ollama installed and running?</span>) : '…'} <button onClick={refreshAi}>Check</button></div></div>
+            {aiSt?.reachable && <div className="frow"><label>Model</label><div><select value={aiCfg.model} onChange={e => { setAi({ model: e.target.value }); window.mail.settings.set({ prefs: { ai: { ...aiCfg, model: e.target.value } } }); }}>{!aiSt.models.some(m => m.name === aiCfg.model) && <option value={aiCfg.model}>{aiCfg.model} (not downloaded)</option>}{aiSt.models.map(m => <option key={m.name} value={m.name}>{m.name}{m.size ? ` · ${(m.size / 1e9).toFixed(1)} GB` : ''}</option>)}</select></div></div>}
+            {aiSt?.reachable && aiCfg.kind === 'ollama' && <div className="frow"><label>Download a model</label><div>
+              {rec.map(r => <div key={r.model} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}><b style={{ minWidth: 110 }}>{r.model}</b><span className="muted" style={{ flex: 1 }}>{r.size} — {r.note}</span>{aiSt.models.some(m => m.name === r.model) ? <span style={{ color: '#1f7a33' }}>✓ installed</span> : <button disabled={!!pull} onClick={() => pullModel(r.model)}>Download</button>}</div>)}
+              {pull && <div className="muted">{pull.status}{pull.total ? ` · ${Math.round((pull.completed || 0) / pull.total * 100)}%` : ''}</div>}
+            </div></div>}
+            <div className="frow"><label>Learn my tone</label><label><input type="checkbox" checked={aiCfg.styleLearning !== false} onChange={e => { setAi({ styleLearning: e.target.checked }); window.mail.settings.set({ prefs: { ai: { ...aiCfg, styleLearning: e.target.checked } } }); }} /> show the model a few of your recent sent messages when drafting, so replies sound like you</label></div>
+            <details style={{ marginTop: 8 }}><summary className="muted">Advanced: other local servers</summary>
+              <div className="frow"><label>Server type</label><select value={aiCfg.kind} onChange={e => setAi({ kind: e.target.value })}><option value="ollama">Ollama</option><option value="openai">OpenAI-compatible (LM Studio, llama.cpp, Jan…)</option></select></div>
+              <div className="frow"><label>Endpoint</label><input type="text" value={aiCfg.endpoint} onChange={e => setAi({ endpoint: e.target.value })} /></div>
+              {aiCfg.kind === 'openai' && <><div className="frow"><label>Model name</label><input type="text" value={aiCfg.model} onChange={e => setAi({ model: e.target.value })} /></div><div className="frow"><label>API key</label><input type="password" value={aiCfg.apiKey} onChange={e => setAi({ apiKey: e.target.value })} placeholder="usually blank for local servers" /></div></>}
+              <div className="frow"><label></label><button className="primary" onClick={async () => { await window.mail.settings.set({ prefs: { ai: aiCfg } }); toast('AI settings saved'); refreshAi(); }}>Save</button></div>
+              <p className="muted">Pointing the endpoint at a cloud service would send your mail there. Tomail is built for local use.</p>
+            </details>
+          </div>}
           {tab === 'snippets' && <div>
             <p className="muted">Reusable text for the editor. Type <code>;trigger</code> then space in a message to expand it, or use the Snippets button in the toolbar. Placeholders: <code>{'{{firstName}}'}</code> (first recipient), <code>{'{{date}}'}</code>, <code>{'{{subject}}'}</code>, <code>{'{{me}}'}</code>.</p>
             {snips.map(s => <div className="snip-row" key={s.id}><code>;{s.trigger}</code><span>{s.name}</span><span className="muted" style={{ whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>{s.bodyHtml.replace(/<[^>]+>/g, ' ').slice(0, 160)}</span><span><button onClick={() => setSnipEdit({ ...s })}>Edit</button> <button onClick={() => window.mail.snippets.remove(s.id).then(() => window.mail.snippets.list().then(setSnips))}>Delete</button></span></div>)}

@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS messages (
   imap_uid INTEGER,
   calendar_json TEXT,
   auth_json TEXT,
+  ai_summary TEXT,
   UNIQUE (account_id, id)
 );
 CREATE INDEX IF NOT EXISTS messages_msgid ON messages(account_id, message_id_hdr);
@@ -199,7 +200,7 @@ class MailDb {
     add('accounts', 'kind', "TEXT NOT NULL DEFAULT 'gmail'"); add('accounts', 'imap_json', 'TEXT'); add('accounts', 'signature', 'TEXT'); add('accounts', 'scopes', 'TEXT');
     add('labels', 'imap_path', 'TEXT');
     add('messages', 'answered', 'INTEGER NOT NULL DEFAULT 0'); add('messages', 'calendar_json', 'TEXT');
-    add('drafts', 'remote_message_id', 'TEXT'); add('contacts', 'source', 'TEXT'); add('messages', 'auth_json', 'TEXT'); add('messages', 'imap_folder', 'TEXT'); add('messages', 'imap_uid', 'INTEGER');
+    add('drafts', 'remote_message_id', 'TEXT'); add('contacts', 'source', 'TEXT'); add('messages', 'auth_json', 'TEXT'); add('messages', 'ai_summary', 'TEXT'); add('messages', 'imap_folder', 'TEXT'); add('messages', 'imap_uid', 'INTEGER');
   }
   prep(sql) {
     let s = this._stmts.get(sql);
@@ -475,6 +476,12 @@ class MailDb {
       }
     });
   }
+  setSummary(accountId, id, text) { this.prep('UPDATE messages SET ai_summary = ? WHERE account_id = ? AND id = ?').run(text, accountId, id); }
+  /** Recent short messages the user wrote (style samples for drafting). */
+  styleSamples(accountId, n = 4) {
+    return this.prep(`SELECT body_text FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id AND ml.label_id = 'SENT'
+      WHERE m.account_id = ? AND body_fetched = 1 AND length(body_text) BETWEEN 80 AND 1500 ORDER BY internal_date DESC LIMIT ?`).all(accountId, n).map(r => r.body_text.split(/\n(?:On .* wrote:|>)/)[0].trim());
+  }
   setCalendar(accountId, id, ev) { this.prep('UPDATE messages SET calendar_json = ? WHERE account_id = ? AND id = ?').run(ev ? JSON.stringify(ev) : null, accountId, id); }
   setBody(accountId, id, { text, html, attachments }) {
     const snippet = (text || '').replace(/\s+/g, ' ').trim().slice(0, 160);
@@ -737,7 +744,7 @@ function publicImap(json) {
 function rowToMessage(r) {
   return {
     ...rowToListItem(r), cc: safeJson(r.cc_json, []), replyTo: r.reply_to, messageIdHdr: r.message_id_hdr,
-    inReplyTo: r.in_reply_to, references: r.references_hdr, bodyFetched: !!r.body_fetched, calendar: safeJson(r.calendar_json, null), auth: safeJson(r.auth_json, null),
+    inReplyTo: r.in_reply_to, references: r.references_hdr, bodyFetched: !!r.body_fetched, calendar: safeJson(r.calendar_json, null), auth: safeJson(r.auth_json, null), aiSummary: r.ai_summary || null,
     bodyText: r.body_text, bodyHtml: r.body_html, attachments: safeJson(r.attachments_json, []),
   };
 }

@@ -339,3 +339,14 @@ a { color: var(--accent); }
 .ach b { display: block; } .ach small { color: var(--muted); }
 .toast.ach-toast { background: #2f6fcb; }
 .snip-row { display: grid; grid-template-columns: 120px 160px 1fr auto; gap: 6px; align-items: start; margin-bottom: 6px; }
+
+/* ── local AI ── */
+.aipanel { margin: 8px 16px; border: 1px solid #cfd8ea; background: #f3f6fc; border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+:root.dark .aipanel { background: #26303f; border-color: #3a4a66; }
+.aipanel .aih { display: flex; gap: 6px; align-items: center; } .aipanel .aih .muted { margin-left: auto; font-size: 11px; }
+.aipanel .aitext { white-space: pre-wrap; margin-top: 8px; line-height: 1.5; }
+.aipanel .aisugs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; } .aipanel .aisugs button { border: 1px solid #b7c6e6; background: #fff; border-radius: 14px; padding: 3px 10px; font-size: 12px; text-align: left; white-space: normal; } :root.dark .aipanel .aisugs button { background: #1e1f22; border-color: #3f5482; }
+.aierr { color: var(--danger); font-size: 12px; margin: 4px 0; }
+.aiprompt { display: flex; gap: 6px; margin-bottom: 6px; } .aiprompt input { flex: 1; }
+.aistream { white-space: pre-wrap; font-size: 13px; color: var(--muted); border: 1px dashed var(--border); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; max-height: 120px; overflow: auto; }
+.thread .card .cb .aipanel { margin: 8px 12px; }

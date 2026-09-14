@@ -17,6 +17,8 @@ const { cleanUrl } = require('./links');
 const { exportMbox } = require('./exportMbox');
 const achievements = require('./achievements');
 const appLock = require('./appLock');
+const ai = require('./ai');
+const aiJobs = new Map();
 
 const DEMO = process.env.MAIL_DEMO === '1';
 let log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);   // replaced by the file logger once userData is known
@@ -449,6 +451,43 @@ function registerIpc() {
   handle('lock:set', (pass, current) => { if (appLock.enabled(settings) && !appLock.verify(settings, current || '')) throw new Error('Current passphrase is wrong'); if (pass) appLock.setPass(settings, pass); else appLock.clearPass(settings); return true; });
   handle('lock:verify', (pass) => appLock.verify(settings, pass));
   // achievements
+  // ── local AI (Ollama / OpenAI-compatible on localhost) ──
+  const aiRun = async (reqId, messages, opts = {}) => {
+    const ac = new AbortController(); aiJobs.set(reqId, ac);
+    try { return await ai.chat(settings, messages, { ...opts, signal: ac.signal, onToken: opts.stream ? (t) => send('ai:token', { reqId, text: t }) : undefined }); }
+    finally { aiJobs.delete(reqId); send('ai:done', { reqId }); }
+  };
+  const meName = (accountId) => { const a = db.getAccount(accountId); return a?.display_name && a.display_name !== a.email ? a.display_name : (a?.email || 'me'); };
+  handle('ai:status', () => ai.status(settings));
+  handle('ai:recommended', () => ai.RECOMMENDED);
+  handle('ai:pull', async (model) => { const ac = new AbortController(); aiJobs.set('pull', ac); try { await ai.pull(settings, model, (p) => send('ai:pull-progress', p), ac.signal); return true; } finally { aiJobs.delete('pull'); } });
+  handle('ai:cancel', (reqId) => { aiJobs.get(reqId)?.abort(); return true; });
+  handle('ai:summarise', async (reqId, accountId, id, threadId) => {
+    const msgs = threadId ? db.threadMessages(accountId, threadId) : [await actions.getMessage(accountId, id)].filter(Boolean);
+    for (const m of msgs) if (!m.bodyFetched) { const full = await actions.getMessage(m.accountId, m.id); Object.assign(m, full); }
+    if (!msgs.length) throw new Error('Message not found');
+    const text = await aiRun(reqId, ai.summarisePrompt(msgs, meName(accountId)), { stream: true, maxTokens: 500 });
+    if (!threadId && text.trim()) db.setSummary(accountId, id, text.trim());
+    return text;
+  });
+  handle('ai:suggest', async (reqId, accountId, id) => {
+    const m = await actions.getMessage(accountId, id); if (!m) throw new Error('Message not found');
+    const raw = await aiRun(reqId, ai.suggestPrompt(m, meName(accountId)), { json: true, maxTokens: 300, temperature: 0.7 });
+    try { const j = JSON.parse(raw); return (j.replies || []).slice(0, 3).map(String); } catch { return raw.split('\n').filter(Boolean).slice(0, 3); }
+  });
+  handle('ai:draft', async (reqId, { accountId, originalId, instruction, mode }) => {
+    const original = originalId ? await actions.getMessage(accountId, originalId) : null;
+    const cfg = { ...ai.DEFAULTS, ...(settings.get().prefs.ai || {}) };
+    const styleSamples = cfg.styleLearning ? db.styleSamples(accountId) : [];
+    return aiRun(reqId, ai.draftPrompt({ original, instruction, styleSamples, me: meName(accountId), mode: mode || (original ? 'reply' : 'new') }), { stream: true, maxTokens: 600, temperature: 0.5 });
+  });
+  handle('ai:rewrite', (reqId, text, mode) => aiRun(reqId, ai.rewritePrompt(text, mode), { stream: true, maxTokens: 900, temperature: 0.2 }));
+  handle('ai:rule', async (reqId, text, accountId) => {
+    const labels = (accountId ? db.listLabels(accountId) : db.listAccounts().flatMap(a => db.listLabels(a.id))).filter(l => l.type === 'user' || l.id === 'ARCHIVE');
+    const raw = await aiRun(reqId, ai.rulePrompt(text, labels), { json: true, maxTokens: 400, temperature: 0 });
+    const j = JSON.parse(raw);
+    return { name: j.name || text.slice(0, 40), match: j.match === 'any' ? 'any' : 'all', conditions: (j.conditions || []).filter(c => c.field), actions: (j.actions || []).filter(a => a.type) };
+  });
   handle('achievements:list', () => ({ all: achievements.LIST.map(({ id, title, body }) => ({ id, title, body })), unlocked: db.kvGet('achievements') || {} }));
   handle('achievements:check', () => checkAchievements());
   handle('achievements:reset', () => { db.kvSet('achievements', {}); return true; });

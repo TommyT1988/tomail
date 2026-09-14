@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { addrList, fmtAddr, fmtAddrFull, fmtFull, fmtRange, fmtSize, fmtTime, followUpPresets, fmtDuration, ago } from '../util.js';
 import { Dropdown, MI } from './Menus.jsx';
 import { analyse } from '../phishing.js';
+import { useAiStream } from '../useAi.js';
 import Icon from './Icons.jsx';
 
 export function buildDoc(html, { allowRemote }) {
@@ -126,6 +127,30 @@ function SenderCard({ message, onOpenMessage, onRuleFromSender, onInfo }) {
     </div>
   );
 }
+/** ✨ Summary panel (streams) + suggested one-line replies that drop into the quick reply box. */
+function AiPanel({ message, thread, onSuggest }) {
+  const sum = useAiStream();
+  const [sugs, setSugs] = useState(null); const [sugBusy, setSugBusy] = useState(false);
+  const [ai, setAi] = useState(null);
+  useEffect(() => { window.mail.settings.get().then(s => setAi(s.prefs.ai || null)); }, []);
+  useEffect(() => { sum.setText(message.aiSummary && !thread ? message.aiSummary : ''); setSugs(null); }, [message.id, thread?.length]); // eslint-disable-line
+  if (!ai?.enabled) return null;
+  const summarise = () => sum.run((id) => window.mail.ai.summarise(id, message.accountId, message.id, thread?.length > 1 ? message.threadId : null));
+  const suggest = async () => { setSugBusy(true); try { const id = 'sug' + Date.now(); setSugs(await window.mail.ai.suggest(id, message.accountId, message.id)); } catch (e) { setSugs([]); } finally { setSugBusy(false); } };
+  return (
+    <div className="aipanel">
+      <div className="aih">
+        <button onClick={summarise} disabled={sum.busy}>✨ {sum.busy ? 'Summarising…' : sum.text ? 'Summarise again' : thread?.length > 1 ? 'Summarise conversation' : 'Summarise'}</button>
+        {!message.labels?.includes('SENT') && <button onClick={suggest} disabled={sugBusy}>💬 {sugBusy ? 'Thinking…' : 'Suggest replies'}</button>}
+        {sum.busy && <button onClick={sum.cancel}>Stop</button>}
+        <span className="muted">runs on this computer</span>
+      </div>
+      {sum.error && <div className="aierr">{sum.error}</div>}
+      {sum.text && <div className="aitext">{sum.text}</div>}
+      {sugs && <div className="aisugs">{sugs.length ? sugs.map((s, i) => <button key={i} onClick={() => onSuggest?.(s)} title="Use this reply">{s}</button>) : <span className="muted">No suggestions.</span>}</div>}
+    </div>
+  );
+}
 function PhishingBanner({ message, senderInfo }) {
   const r = useMemo(() => analyse({ ...message, senderFirstContact: senderInfo ? senderInfo.received <= 1 && senderInfo.sentTo === 0 : false }), [message.id, message.bodyHtml, senderInfo]);
   if (r.level === 'none') return null;
@@ -137,9 +162,10 @@ function PhishingBanner({ message, senderInfo }) {
   );
 }
 /** Inline reply box under a message: plain text, sends with the original quoted. */
-function QuickReply({ message, toast, autoFocus }) {
+function QuickReply({ message, toast, autoFocus, seed }) {
   const [text, setText] = useState('');
   const [open, setOpen] = useState(!!autoFocus);
+  useEffect(() => { if (seed) { setText(seed.text); setOpen(true); } }, [seed]);
   const [busy, setBusy] = useState(false);
   const [all, setAll] = useState(false);
   const ref = useRef(null);
@@ -220,6 +246,7 @@ function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo })
 export default function ReadingPane({ message, thread, loading, prefs, error, onRespond, onPrint, onReplyTo, onPopOut, onOpenMessage, onRuleFromSender, toast, quickReply }) {
   const [allow, setAllow] = useState({});
   const [senderInfo, setSenderInfo] = useState(null);
+  const [seed, setSeed] = useState(null);
   const [openIds, setOpenIds] = useState(new Set());
   useEffect(() => { if (thread?.length) setOpenIds(new Set([thread[thread.length - 1].id, ...thread.filter(m => m.unread).map(m => m.id)])); }, [thread?.map(m => m.id).join(',')]); // eslint-disable-line
   const allowRemote = !!(prefs?.loadRemoteImages || (message && allow[message.id]));
@@ -233,10 +260,11 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
           <span className="hbtns"><FollowUpMenu message={latest} toast={toast} />{onPopOut && <button onClick={() => onPopOut(latest)}><Icon name="external" size={12} /> Window</button>}<button onClick={() => setOpenIds(new Set(thread.map(m => m.id)))}>Expand all</button><button onClick={() => setOpenIds(new Set([latest.id]))}>Collapse</button></span></div></div>
         <SenderCard message={latest} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} onInfo={setSenderInfo} />
         {latest.bodyFetched && <PhishingBanner message={latest} senderInfo={senderInfo} />}
+        {latest.bodyFetched && <AiPanel message={latest} thread={thread} onSuggest={(t) => setSeed({ text: t, at: Date.now() })} />}
         <div className="thread">
           {thread.map(m => <ThreadCard key={m.id} m={m.id === message.id ? message : m} open={openIds.has(m.id)} prefs={prefs} onRespond={onRespond} onPrint={onPrint} onReplyTo={onReplyTo}
             onToggle={() => setOpenIds(s => { const n = new Set(s); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })} />)}
-          {!latest.labels?.includes('SENT') && <QuickReply message={latest} toast={toast} autoFocus={quickReply} />}
+          {!latest.labels?.includes('SENT') && <QuickReply message={latest} toast={toast} autoFocus={quickReply} seed={seed} />}
         </div>
       </div>
     );
@@ -246,13 +274,14 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
       <Header message={message} onPrint={onPrint} onPopOut={onPopOut} toast={toast} />
       <SenderCard message={message} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} onInfo={setSenderInfo} />
       {message.bodyFetched && <PhishingBanner message={message} senderInfo={senderInfo} />}
+      {message.bodyFetched && <AiPanel message={message} onSuggest={(t) => setSeed({ text: t, at: Date.now() })} />}
       {message.calendar && <InviteCard m={message} onRespond={onRespond} />}
       <Attachments m={message} />
       {error && <div className="imgbar" style={{ background: '#fde8e6', borderColor: '#f3b5ae' }}>⚠ {error}</div>}
       {hasRemoteImages(message.bodyHtml) && !allowRemote && <div className="imgbar"><Icon name="image" size={13} /> Remote images are blocked in this message. <button onClick={() => setAllow(a => ({ ...a, [message.id]: true }))}>Load images</button></div>}
       {!message.bodyFetched && loading && <div className="plain muted">Downloading message…</div>}
       {message.bodyHtml ? <BodyFrame html={message.bodyHtml} allowRemote={allowRemote} /> : <div className="plain">{message.bodyText || (message.bodyFetched ? '' : message.snippet)}</div>}
-      {message.bodyFetched && !message.labels?.includes('SENT') && <QuickReply message={message} toast={toast} autoFocus={quickReply} />}
+      {message.bodyFetched && !message.labels?.includes('SENT') && <QuickReply message={message} toast={toast} autoFocus={quickReply} seed={seed} />}
     </div>
   );
 }
