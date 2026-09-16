@@ -97,7 +97,7 @@ export default function App() {
     const remote = d.remote.filter(x => !v.accountId || x.accountId === v.accountId).map(x => ({ ...x, isDraft: true, remoteDraft: true, toText: (x.to || []).map(a => a.email).join(', '), unread: false }));
     return [...local, ...remote].sort((a, b) => b.date - a.date);
   }, []);
-  const loadList = useCallback(async (v, { append = false } = {}) => {
+  const loadList = useCallback(async (v, { append = false, keep = false } = {}) => {
     if (v.kind === 'drafts') { const d = await mail.drafts.list(); setDrafts(d); const it = draftItems(v, d); setItems(it); setTotal(it.length); setHasMore(false); return; }
     if (v.kind === 'scheduled') { const sc = await mail.scheduled.list(); setScheduled(sc); const it = sc.map(s => ({ accountId: s.accountId, id: 'sc:' + s.id, sched: s, isScheduled: true, subject: s.subject, toText: s.to, fromName: 'Scheduled', fromEmail: '', snippet: `sends ${new Date(s.sendAt).toLocaleString('en-GB')}`, date: s.sendAt, size: 0, labels: [], to: [], unread: false, starred: false })); setItems(it); setTotal(it.length); setHasMore(false); return; }
     if (v.kind === 'followups') { const fu = await mail.followups.list(); setFollowups(fu); const it = fu.map(f => ({ accountId: f.accountId, id: 'fu:' + f.id, followup: f, isFollowup: true, subject: f.subject, toText: f.to, fromName: f.status === 'due' ? 'No reply yet' : 'Waiting for reply', fromEmail: '', snippet: `sent ${new Date(f.createdAt).toLocaleDateString('en-GB')} · reminder ${new Date(f.dueAt).toLocaleDateString('en-GB')}`, date: f.dueAt, size: 0, labels: [], to: [], unread: f.status === 'due', starred: false })); setItems(it); setTotal(it.length); setHasMore(false); return; }
@@ -105,12 +105,14 @@ export default function App() {
     setLoading(true);
     try {
       const offset = append ? itemsRef.current.length : 0;
+      // keep: reload everything currently shown (rounded up to a page) so a background refresh doesn't snap a scrolled list back to the top
+      const limit = keep ? Math.max(PAGE, Math.ceil(itemsRef.current.length / PAGE) * PAGE) : PAGE;
       const q = { ...v, threaded: threadedRef.current && !['drafts', 'snoozed'].includes(v.kind) };
-      const [rows, n] = await Promise.all([mail.messages.list(q, { offset, limit: PAGE }), append ? Promise.resolve(null) : mail.messages.count(q)]);
+      const [rows, n] = await Promise.all([mail.messages.list(q, { offset, limit }), append ? Promise.resolve(null) : mail.messages.count(q)]);
       if (!sameView(viewRef.current, v)) return;
       setItems(append ? [...itemsRef.current, ...rows] : rows);
       if (n != null) setTotal(n);
-      setHasMore(rows.length === PAGE);
+      setHasMore(rows.length === limit);
     } catch (e) { toast(e.message, true); }
     finally { setLoading(false); }
   }, [toast, draftItems]);
@@ -118,7 +120,7 @@ export default function App() {
   useEffect(() => { mail.app.info().then(i => { setInfo(i); document.title = `Tomail ${i.version}${i.demo ? ' (demo)' : ''}`; }); mail.settings.get().then(s => { setPrefs(s.prefs); applyTheme(s.prefs.theme); if (s.prefs.threaded && localStorage.getItem('threaded') == null) setThreadedRaw(true); }); loadMeta(); }, [loadMeta]);
   useEffect(() => { loadList(view); }, [view, threaded, loadList]);
   useEffect(() => {
-    const off1 = mail.on('mail:changed', () => { loadMeta(); loadList(viewRef.current); });
+    const off1 = mail.on('mail:changed', () => { loadMeta(); loadList(viewRef.current, { keep: true }); });
     const off2 = mail.on('sync:status', (s) => setStatus(s));
     const off3 = mail.on('app:update-ready', (u) => setUpdateReady(u));
     const off4 = mail.on('app:open-message', ({ accountId, id, quickReply }) => { setView(HOME); setTimeout(() => { setSelected([{ accountId, id }]); if (quickReply) setQuickReplyFocus(true); }, 300); });

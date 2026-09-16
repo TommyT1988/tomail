@@ -248,3 +248,11 @@ test('sort orders: date asc, size desc, subject ignores Re:/Fwd:', () => {
   assert.deepEqual(ids({ sort: { col: 'subject', dir: 'asc' } }), ['b', 'c', 'a']);
   db.reorderAccounts([a.id]); assert.equal(db.getAccount(a.id).position, 1);
 });
+
+test('list query uses the (account, date) index', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const plan = db.db.prepare(`EXPLAIN QUERY PLAN SELECT m.rid FROM messages m WHERE m.account_id = ? AND m.snooze_until IS NULL ORDER BY m.internal_date DESC LIMIT 100`).all(a.id).map(r => r.detail).join(' | ');
+  assert.match(plan, /messages_acct_date/);
+  db.analyze(); assert.ok(db.kvGet('lastAnalyze'));
+});

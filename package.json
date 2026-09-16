@@ -1,7 +1,7 @@
 {
   "name": "tomail",
   "productName": "Tomail",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "description": "Tomail \u2014 a fast desktop email client for Gmail and Google Workspace",
   "private": true,
   "main": "electron/main.js",
@@ -25,7 +25,7 @@
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^44.3.0",
-    "electron-builder": "^26.0.12",
+    "electron-builder": "^26.16.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "vite": "^8.3.0",

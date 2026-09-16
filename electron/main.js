@@ -21,7 +21,10 @@ const ai = require('./ai');
 const aiJobs = new Map();
 
 const DEMO = process.env.MAIL_DEMO === '1';
-let log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);   // replaced by the file logger once userData is known
+// stdout/stderr can be a pipe with no reader (desktop launcher, closed terminal): an EPIPE on a
+// console write arrives asynchronously as a stream 'error' and, unhandled, crashes the main process.
+for (const s of [process.stdout, process.stderr]) s?.on?.('error', () => {});
+let log = (...a) => { try { console.log(new Date().toISOString().slice(11, 19), ...a); } catch {} };   // replaced by the file logger once userData is known
 
 // The renderer is served from app://tomail/ rather than file:// so it has a real origin
 // (sandboxed same-origin message frames can be measured; storage is stable).
@@ -45,6 +48,8 @@ const ICON = path.join(__dirname, '..', 'build', 'icon.png');
 if (process.platform === 'win32') app.setAppUserModelId('app.tomail.desktop');
 
 let win, db, settings, accounts, actions;
+const previewWins = new WeakSet();   // attachment viewers: the only windows allowed to show a file: URL
+const PREVIEW_TYPES = /^(image\/(png|jpe?g|gif|webp|bmp|svg\+xml)|application\/pdf|text\/plain)$/i;
 const composeWins = new Map();   // id → { win, payload }
 let composeSeq = 0;
 const syncStatus = {};
@@ -64,7 +69,12 @@ function openLink(url) {
   shell.openExternal(p.cleanLinks === false ? url : cleanUrl(url));
 }
 function send(channel, payload) { for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload); }
-function notifyChanged() { clearTimeout(changeTimer); changeTimer = setTimeout(() => send('mail:changed', {}), 300); }
+/** Renderer refresh is expensive on a big mailbox (counts + list); during an initial download coalesce to one event per 10 s. */
+function notifyChanged() {
+  if (changeTimer) return;
+  const initial = Object.values(syncStatus).some(s => s?.phase === 'initial');
+  changeTimer = setTimeout(() => { changeTimer = null; send('mail:changed', {}); }, initial ? 10000 : 300);
+}
 function broadcastStatus() { send('sync:status', { accounts: syncStatus, lastCheckedAt }); }
 
 async function syncOne(accountId) {
@@ -73,8 +83,10 @@ async function syncOne(accountId) {
   try {
     const p = accounts.provider(accountId);
     if (p.kind === 'imap' && !p.onPush) p.onPush = () => { clearTimeout(pushTimers.get(accountId)); pushTimers.set(accountId, setTimeout(() => syncOne(accountId).catch(() => {}), 800)); };
-    const r = await p.sync((st) => { syncStatus[accountId] = st; broadcastStatus(); if (st.phase !== 'error') notifyChanged(); });
+    let wasInitial = false;
+    const r = await p.sync((st) => { if (st.phase === 'initial') wasInitial = true; syncStatus[accountId] = st; broadcastStatus(); if (st.phase !== 'error') notifyChanged(); });
     syncStatus[accountId] = { phase: 'idle' };
+    if (wasInitial) { try { db.analyze(); log('database statistics refreshed after initial sync'); } catch (e) { log('analyze:', e.message); } }
     lastSyncAt.set(accountId, Date.now());
     notifyChanged();
     if (r?.newIds?.length) { try { const res = await runRules({ db, actions, accountId, ids: r.newIds, log }); if (res.applied) log(`rules: ${res.applied} message(s) filed`); } catch (e) { log('rules:', e.message); } }
@@ -120,6 +132,22 @@ function notifyNewMail(accountId, ids) {
   }
 }
 
+/** Navigation policy for EVERY window Tomail creates (main, compose, message, preview): stay on the
+ *  app's own origin (or the Vite dev server), hand http(s)/mailto to the browser, refuse everything else. */
+function allowedNavigation(wc, url) {
+  let u; try { u = new URL(url); } catch { return false; }
+  if (u.protocol === 'app:') return true;
+  const dev = process.env.VITE_DEV_SERVER_URL;
+  if (dev) { try { if (u.origin === new URL(dev).origin) return true; } catch {} }
+  if (u.protocol === 'file:' && previewWins.has(wc)) return true;
+  return false;
+}
+app.on('web-contents-created', (_e, wc) => {
+  wc.on('will-navigate', (ev, url) => { if (!allowedNavigation(wc, url)) { ev.preventDefault(); openLink(url); } });
+  wc.on('will-redirect', (ev, url) => { if (!allowedNavigation(wc, url)) ev.preventDefault(); });
+  wc.on('will-attach-webview', (ev) => ev.preventDefault());
+  wc.setWindowOpenHandler(({ url }) => { openLink(url); return { action: 'deny' }; });
+});
 function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 1015, minWidth: 900, minHeight: 600, title: `Tomail ${app.getVersion()}`, autoHideMenuBar: true, show: false, icon: ICON,
@@ -127,8 +155,6 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true },
   });
   win.once('ready-to-show', () => win.show());
-  win.webContents.setWindowOpenHandler(({ url }) => { openLink(url); return { action: 'deny' }; });
-  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('http://localhost') && !url.startsWith('app://')) { e.preventDefault(); openLink(url); } });
   win.webContents.on('context-menu', (_e, params) => {
     if (!params.isEditable) return;
     const items = params.dictionarySuggestions.map(s => ({ label: s, click: () => win.webContents.replaceMisspelling(s) }));
@@ -190,7 +216,6 @@ function openComposeWindow(payload) {
   });
   composeWins.set(id, { win: cw, payload });
   cw.once('ready-to-show', () => cw.show());
-  cw.webContents.setWindowOpenHandler(({ url }) => { openLink(url); return { action: 'deny' }; });
   cw.webContents.on('context-menu', (_e, params) => {
     if (!params.isEditable) return;
     const items = params.dictionarySuggestions.map(s => ({ label: s, click: () => cw.webContents.replaceMisspelling(s) }));
@@ -218,7 +243,6 @@ function openMessageWindow(accountId, id) {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   messageWins.set(key, mw);
   mw.once('ready-to-show', () => mw.show());
-  mw.webContents.setWindowOpenHandler(({ url }) => { openLink(url); return { action: 'deny' }; });
   mw.on('closed', () => messageWins.delete(key));
   const remember = () => { if (!mw.isDestroyed() && !mw.isMinimized() && !mw.isMaximized()) settings.set({ prefs: { messageBounds: mw.getBounds() } }); };
   mw.on('resize', remember); mw.on('move', remember);
@@ -262,6 +286,7 @@ function housekeeping() {
     if (days) { const n = db.pruneBodies(days); if (n) log(`housekeeping: cleared ${n} cached bodies older than ${days} days`); }
     const last = db.kvGet('lastVacuum') || 0;
     if (Date.now() - last > 7 * 86400000) { db.vacuum(); log('housekeeping: database compacted'); }
+    if (Date.now() - (db.kvGet('lastAnalyze') || 0) > 7 * 86400000) { db.analyze(); log('housekeeping: statistics refreshed'); }
   } catch (e) { log('housekeeping:', e.message); }
 }
 function handle(channel, fn) {
@@ -303,10 +328,14 @@ function registerIpc() {
     return `data:${att.mimeType || 'application/octet-stream'};base64,${Buffer.from(data).toString('base64')}`;
   });
   handle('attachments:preview', async (accountId, messageId, att) => {
+    const mime = String(att.mimeType || '').toLowerCase().split(';')[0].trim();
+    const byExt = /\.(png|jpe?g|gif|webp|bmp|pdf|txt)$/i.test(att.filename || '');
+    if (!PREVIEW_TYPES.test(mime) && !byExt) throw new Error('Preview is only available for images, PDFs and plain text — use Open or Save instead');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tomail-'));
     const file = path.join(dir, (att.filename || 'attachment').replace(/[\\/:*?"<>|]/g, '_'));
     fs.writeFileSync(file, await actions.getAttachment(accountId, messageId, att.attachmentId));
-    const pw = new BrowserWindow({ width: 1000, height: 800, title: att.filename, autoHideMenuBar: true, icon: ICON, webPreferences: { sandbox: true, plugins: true } });
+    const pw = new BrowserWindow({ width: 1000, height: 800, title: att.filename, autoHideMenuBar: true, icon: ICON, webPreferences: { sandbox: true, plugins: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
+    previewWins.add(pw.webContents);
     pw.loadFile(file);
     return true;
   });

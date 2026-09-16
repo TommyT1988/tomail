@@ -14,16 +14,17 @@ Grab the installer for your machine from the **[latest release](https://github.c
 |---|---|
 | Windows (x64) | `Tomail-x.y.z-win-x64.exe` |
 | Windows on ARM | `Tomail-x.y.z-win-arm64.exe` |
+| Windows, either (bigger) | `Tomail-x.y.z-win.exe` — one installer carrying both, picks the right one |
 | macOS, Apple Silicon | `Tomail-x.y.z-mac-arm64.dmg` |
 | macOS, Intel | `Tomail-x.y.z-mac-x64.dmg` |
 | Linux (x64) | `Tomail-x.y.z-linux-x86_64.AppImage` or `-linux-amd64.deb` |
 | Linux (ARM64) | `Tomail-x.y.z-linux-arm64.AppImage` or `-linux-arm64.deb` |
 
-Installers aren't code-signed yet, so the first launch shows a warning: on Windows click **More info → Run anyway**; on macOS right-click the app and choose **Open**. On Linux, `chmod +x` the AppImage and run it, or add it to your app menu with [Gear Lever](https://flathub.org/apps/it.mijorus.gearlever). Tomail updates itself from these releases.
+Installers aren't code-signed yet, so the first launch shows a warning: on Windows click **More info → Run anyway**; on macOS right-click the app and choose **Open** (on macOS 15 and later go to **System Settings → Privacy & Security** and click **Open Anyway** after the first blocked attempt). Because the macOS build is unsigned, **auto-update doesn't work on macOS yet**; download new versions from this page. Windows and Linux update themselves. On Linux, `chmod +x` the AppImage and run it, or add it to your app menu with [Gear Lever](https://flathub.org/apps/it.mijorus.gearlever). Tomail updates itself from these releases.
 
 ## First run
 
-Click **Sign in with Google** and sign in through your browser. Tomail asks only for `gmail.modify` (read, label, archive, trash, send) and never for permanent delete unless you grant it separately later. Your password never passes through the app, and tokens are kept in your operating system's keychain.
+Click **Sign in with Google** and sign in through your browser. Tomail asks only for `gmail.modify` (read, label, archive, trash, send) and never for permanent delete unless you grant it separately later. Your password never passes through the app. Sign-in tokens are stored in Tomail's local database, encrypted with a key held by your operating system's keychain (Windows DPAPI, macOS Keychain, GNOME Keyring / KWallet on Linux); on a Linux system without a keyring service they're stored unencrypted, and Settings says which applies.
 
 For any other provider, **Settings → Accounts → Add other account (IMAP)**: type the address, and Tomail looks up the server settings (built-in list of major providers plus Mozilla's provider database). Yahoo, iCloud, Fastmail and Gmail-over-IMAP need an app password. Outlook.com and Microsoft 365 have mostly retired password sign-in for IMAP, so they need an app password where the tenant allows it; Microsoft OAuth is on the roadmap.
 
@@ -116,7 +117,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 
 ## Privacy
 
-Mail is stored only on your computer, in an SQLite database under the app's data folder (shown in Settings). The database file itself isn't encrypted (the bundled SQLite can't), so rely on your operating system's disk encryption; the app lock protects the window, not the file. Tomail talks to Google or your IMAP server directly; there is no Tomail server, no telemetry, and nothing is sent anywhere except the mail you send. Tracking pixels don't fire unless you load a message's images. "Report a problem" only opens a browser tab with text you can edit before submitting.
+Mail is stored only on your computer, in an SQLite database under the app's data folder (shown in Settings). The database file itself isn't encrypted (the bundled SQLite can't), so rely on your operating system's disk encryption; the app lock protects the window, not the file. Tomail talks to Google or your IMAP server directly; there is no Tomail server, no telemetry, and nothing is sent anywhere except the mail you send. Account tokens and IMAP passwords sit in that database encrypted via the OS keychain (plaintext only on Linux without a keyring, which Settings will tell you). Tracking pixels don't fire unless you load a message's images. "Report a problem" only opens a browser tab with text you can edit before submitting.
 
 ## Build it yourself
 

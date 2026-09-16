@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS drafts (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS messages_date ON messages(internal_date DESC);
+CREATE INDEX IF NOT EXISTS messages_acct_date ON messages(account_id, internal_date DESC);
 CREATE INDEX IF NOT EXISTS messages_thread ON messages(account_id, thread_id);
 CREATE INDEX IF NOT EXISTS messages_snooze ON messages(snooze_until) WHERE snooze_until IS NOT NULL;
 CREATE TABLE IF NOT EXISTS message_labels (
@@ -415,6 +416,7 @@ class MailDb {
       WHERE body_fetched = 1 AND internal_date < ? AND starred = 0 AND snooze_until IS NULL`).run(cutoff).changes);
   }
   vacuum() { this.db.exec('VACUUM'); this.kvSet('lastVacuum', Date.now()); }
+  analyze() { this.db.exec('ANALYZE'); this.kvSet('lastAnalyze', Date.now()); }
   stats() {
     const n = this.prep('SELECT count(*) AS n, sum(body_fetched) AS b FROM messages').get();
     return { messages: n.n, bodies: n.b || 0, lastVacuum: this.kvGet('lastVacuum') };

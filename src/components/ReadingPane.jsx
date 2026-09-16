@@ -9,7 +9,11 @@ export function buildDoc(html, { allowRemote }) {
   let h = html || '';
   h = h.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<meta[^>]+http-equiv[^>]*>/gi, '').replace(/\son\w+="[^"]*"/gi, '').replace(/\son\w+='[^']*'/gi, '');
   if (!allowRemote) h = h.replace(/(<img\b[^>]*?\s)src=(["'])(https?:)?\/\//gi, '$1data-blocked-src=$2$3//').replace(/url\((["']?)https?:\/\//gi, 'url($1about:blank#');
-  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank">
+  // A CSP in the frame is what actually stops remote loads (srcset, <picture>, SVG <image>, video posters, CSS url()); the regex above is only cosmetic.
+  const csp = allowRemote
+    ? "default-src 'none'; img-src data: cid: http: https:; media-src http: https: data:; style-src 'unsafe-inline' http: https:; font-src data: http: https:"
+    : "default-src 'none'; img-src data: cid:; style-src 'unsafe-inline'; font-src data:";
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank">
 <style>body{margin:12px 16px;font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;color:#222;line-height:1.45;word-wrap:break-word;background:#fff}img{max-width:100%;height:auto}blockquote{border-left:2px solid #ccc;margin:0;padding-left:1ex;color:#555}pre{white-space:pre-wrap}a{color:#2f6fcb}</style>
 </head><body>${h}</body></html>`;
 }
@@ -33,7 +37,7 @@ function BodyFrame({ html, allowRemote, autoHeight }) {
 }
 
 const isImage = (a) => /^image\//i.test(a.mimeType || '') && (a.size || 0) < 12 * 1024 * 1024;
-const canPreview = (a) => isImage(a) || /pdf$/i.test(a.mimeType || '') || /\.pdf$/i.test(a.filename || '') || /^text\//i.test(a.mimeType || '');
+const canPreview = (a) => isImage(a) || /^application\/pdf$/i.test(a.mimeType || '') || /\.pdf$/i.test(a.filename || '') || /^text\/plain$/i.test(a.mimeType || '') || /\.txt$/i.test(a.filename || '');
 function Thumb({ m, a }) {
   const [src, setSrc] = useState(null);
   useEffect(() => { let on = true; window.mail.attachments.data(m.accountId, m.id, a).then(d => on && setSrc(d)).catch(() => {}); return () => { on = false; }; }, [m.accountId, m.id, a.attachmentId]);
