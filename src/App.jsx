@@ -394,7 +394,7 @@ export default function App() {
           try {
             const r = await mail.app.checkForUpdates();
             if (r.unsupported) toast(`Tomail v${r.version} — automatic updates only work in an installed build`);
-            else if (r.error) toast(`Couldn't check for updates: ${r.error}`, true);
+            else if (r.error) toast(r.error, true);
             else if (r.available) toast(`Tomail ${r.latest} is available — downloading it now`);
             else toast(`You're on the latest version (v${r.version})`);
           } finally { setChecking(false); }

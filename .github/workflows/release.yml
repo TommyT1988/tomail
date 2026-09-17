@@ -2,6 +2,11 @@ name: Release
 # Tag a commit `vX.Y.Z` (matching package.json version) to build installers for
 # Windows / macOS / Linux and attach them to a GitHub Release. Auto-update reads
 # the same release. Requires repo secrets TOMAIL_GOOGLE_CLIENT_ID + _SECRET.
+#
+# The release is built as a DRAFT and only published once every platform has
+# finished uploading. electron-builder publishes as it goes, so a live release
+# used to appear with nothing in it but blockmaps, and every client checking for
+# an update in that window got a 404 for latest-*.yml.
 on: { push: { tags: ['v*'] } }
 permissions: { contents: write }
 jobs:
@@ -23,3 +28,34 @@ jobs:
       - run: npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    # Only when all three built AND the release actually holds what people download.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the draft is complete, then publish it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VER="${TAG#v}"
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          REL=$(curl -sf -H "Authorization: token $GH_TOKEN" "$API/releases/tags/$TAG")
+          ID=$(printf '%s' "$REL" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          NAMES=$(printf '%s' "$REL" | python3 -c 'import json,sys; print("\n".join(a["name"] for a in json.load(sys.stdin)["assets"]))')
+          MISSING=""
+          for f in "Tomail-$VER-win-x64.exe" "Tomail-$VER-win-arm64.exe" "Tomail-$VER-win.exe" \
+                   "Tomail-$VER-mac-x64.dmg" "Tomail-$VER-mac-arm64.dmg" \
+                   "Tomail-$VER-linux-x86_64.AppImage" "Tomail-$VER-linux-arm64.AppImage" \
+                   "Tomail-$VER-linux-amd64.deb" "Tomail-$VER-linux-arm64.deb" \
+                   latest.yml latest-mac.yml latest-linux.yml latest-linux-arm64.yml; do
+            printf '%s\n' "$NAMES" | grep -qx "$f" || MISSING="$MISSING $f"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "Release $TAG is incomplete, leaving it as a draft. Missing:$MISSING"
+            exit 1
+          fi
+          echo "All expected files present — publishing $TAG"
+          curl -sf -X PATCH -H "Authorization: token $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "$API/releases/$ID" -d '{"draft":false}' > /dev/null

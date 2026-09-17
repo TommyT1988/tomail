@@ -492,7 +492,15 @@ function registerIpc() {
   handle('app:checkForUpdates', async () => {
     if (!updateChecker) return { version: app.getVersion(), unsupported: true };
     try { return await updateChecker(); }
-    catch (e) { return { version: app.getVersion(), error: e.message }; }
+    catch (e) {
+      log('update check failed:', e?.message || e);
+      const msg = String(e?.message || e);
+      // 404 on the manifest = a release mid-upload, or none for this platform yet
+      const friendly = /404|Cannot find .*\.yml/i.test(msg) ? 'No update available yet — if one has just been released, give it a few minutes to finish uploading.'
+        : /net::|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|timed out/i.test(msg) ? "Couldn't reach GitHub to check for updates."
+        : 'Update check failed — the log has the details (Settings → General → Open log folder).';
+      return { version: app.getVersion(), error: friendly };
+    }
   });
   handle('app:reportProblem', (description) => {
     const redact = (s) => String(s).replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '<email>');
@@ -760,6 +768,9 @@ app.whenReady().then(async () => {
         const latest = r?.updateInfo?.version;
         return { version: app.getVersion(), latest: latest || null, available: !!latest && latest !== app.getVersion() };
       };
+      // A release that is still uploading has no latest-*.yml yet, so a check lands on a 404. That is a
+      // "try again shortly", not something to show someone a stack trace over.
+      autoUpdater.on('error', (e) => log('updater:', e?.message || e));
     } catch (e) { log('updater unavailable:', e.message); }
   }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
