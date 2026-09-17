@@ -50,7 +50,7 @@ export default function MessageList({ items, total, loading, view, setView, sele
         )) : <span className="tab active" style={{ cursor: 'default' }}>{viewTitle(view, labelsById, accounts)}</span>}
         <span className="spacer" />
         {!isDrafts && <button className="tab" title="Group messages by conversation" onClick={() => setThreaded(!threaded)} style={{ padding: '4px 8px' }}><Icon name="layers" size={12} /> {threaded ? 'Conversations: on' : 'Conversations: off'}</button>}
-        <span className="count">{loading && !items.length ? 'Loading…' : `${(total ?? items.length).toLocaleString()} ${isDrafts ? 'draft' : threaded ? 'conversation' : 'message'}${total === 1 ? '' : 's'}`}</span>
+        <span className="count">{loading && !items.length ? 'Loading…' : `${total == null ? '…' : total.toLocaleString()} ${isDrafts ? 'draft' : threaded ? 'conversation' : 'message'}${total === 1 ? '' : 's'}`}</span>
       </div>
       <div className="cols"><span /><Th col="from">{isDrafts ? 'To' : 'From'}</Th><Th col="subject">Subject</Th><Th col="date" right>{isDrafts ? 'Saved' : 'Received'}</Th><Th col="size" right>Size</Th></div>
       <div className="rows" ref={ref} tabIndex={0} onKeyDown={onKey}>

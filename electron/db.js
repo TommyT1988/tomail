@@ -682,6 +682,12 @@ class MailDb {
     return this.prep('SELECT id, imap_uid AS uid, unread, starred, answered, labels_json FROM messages WHERE account_id = ? AND imap_folder = ?').all(accountId, folder)
       .map(r => ({ ...r, labels: safeJson(r.labels_json, []) }));
   }
+  /** Newest inbox mail whose body we haven't downloaded — what prefetching works through. */
+  bodiesToPrefetch(accountId, limit = 5, maxSize = 2 * 1024 * 1024) {
+    return this.prep(`SELECT m.id FROM message_labels ml JOIN messages m ON m.account_id = ml.account_id AND m.id = ml.message_id
+      WHERE ml.account_id = ? AND ml.label_id = 'INBOX' AND m.body_fetched = 0 AND m.size <= ? AND m.snooze_until IS NULL
+      ORDER BY ml.d DESC LIMIT ?`).all(accountId, maxSize, limit).map(r => r.id);
+  }
   labelIds(accountId, labelId) { return this.prep('SELECT message_id AS id FROM message_labels WHERE account_id = ? AND label_id = ?').all(accountId, labelId).map(r => r.id); }
   // ── imap folder state ──
   imapFolder(accountId, path) { return this.prep('SELECT * FROM imap_folders WHERE account_id = ? AND path = ?').get(accountId, path) || null; }

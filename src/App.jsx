@@ -115,10 +115,15 @@ export default function App() {
       // pages ABOVE. Paging from the oldest end put today thousands of rows below page 1.
       const asc = isDateAsc(v);
       const q = { ...v, sort: asc ? { col: 'date', dir: 'desc' } : v.sort, threaded: threadedRef.current && !['drafts', 'snoozed'].includes(v.kind) };
-      const [rows, n] = await Promise.all([mail.messages.list(q, { offset, limit }), append ? Promise.resolve(null) : mail.messages.count(q)]);
+      // The page and the "N messages" total are asked for together but NOT waited for together:
+      // counting a folder takes ~100ms on a big mailbox and the list itself takes ~1ms.
+      if (!append) {
+        setTotal(null);
+        mail.messages.count(q).then(n => { if (sameView(viewRef.current, v)) setTotal(n); }).catch(() => {});
+      }
+      const rows = await mail.messages.list(q, { offset, limit });
       if (!sameView(viewRef.current, v)) return;
       setItems(mergePage(itemsRef.current, rows, { asc, append }));
-      if (n != null) setTotal(n);
       setHasMore(rows.length === limit);
     } catch (e) { toast(e.message, true); }
     finally { setLoading(false); }

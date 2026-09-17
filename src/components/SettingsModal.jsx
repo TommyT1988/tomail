@@ -150,6 +150,8 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
             <div className="sgroup">Reading</div>
             <div className="frow"><label>Conversations</label><label><input type="checkbox" checked={!!s.prefs.threaded} onChange={e => pref('threaded', e.target.checked)} /> group messages by conversation by default</label></div>
             <div className="frow"><label>Mark as read after</label><div><input type="number" min="0" style={{ width: 80 }} value={s.prefs.markReadDelayMs} onChange={e => pref('markReadDelayMs', Number(e.target.value))} /> ms in the reading pane (0 = immediately)</div></div>
+            <div className="frow"><label>Read ahead</label><label title="Downloads recent inbox mail in the background so opening it is instant"><input type="checkbox" checked={s.prefs.prefetchBodies !== false} onChange={e => pref('prefetchBodies', e.target.checked)} /> download recent inbox messages before you open them</label></div>
+            <div className="frow"><label></label><small>Uses a little more disk and a little more of your mail provider's quota. It waits until the first sync of an account has finished.</small></div>
             <div className="frow"><label>Remote images</label><label><input type="checkbox" checked={!!s.prefs.loadRemoteImages} onChange={e => pref('loadRemoteImages', e.target.checked)} /> always load images in messages (tracking pixels will fire)</label></div>
 
             <div className="sgroup">Writing</div>

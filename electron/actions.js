@@ -138,13 +138,13 @@ class Actions {
     this.log(`${id}: late inline image(s) filled in`);
     this.onMessageUpdated(accountId, id);
   }
-  async getMessage(accountId, id) {
+  async getMessage(accountId, id, { priority, quiet = false } = {}) {
     let m = this.db.getMessage(accountId, id);
     if (!m) return null;
     if (m.bodyFetched) return m;
     const p = this.providers(accountId);
     const t0 = Date.now();
-    const full = await p.fetchFull(id);
+    const full = await p.fetchFull(id, priority == null ? undefined : { priority });
     const tBody = Date.now() - t0;
     let html = full.html || '';
     /* Inline images are each their own round trip. Waiting for all of them before showing anything is
@@ -174,7 +174,7 @@ class Actions {
     if (event) this.db.setCalendar(accountId, id, event);
     if (late) this.patchLateImages(accountId, id, inFlight, got).catch(() => {});
     m = this.db.getMessage(accountId, id);
-    this.onChange();
+    if (!quiet) this.onChange();     // prefetching in the background must not churn the list
     return m;
   }
   getAttachment(accountId, messageId, attachmentId) { return this.providers(accountId).getAttachment(messageId, attachmentId); }

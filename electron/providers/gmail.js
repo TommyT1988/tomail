@@ -34,10 +34,10 @@ class GmailProvider {
       await this.client.post('/messages/batchModify', { ids: ids.slice(i, i + 1000), addLabelIds: add, removeLabelIds: remove });
     }
   }
-  async fetchFull(id) {
-    const full = await this.client.get(`/messages/${id}`, { format: 'full' });
+  async fetchFull(id, opts) {
+    const full = await this.client.get(`/messages/${id}`, { format: 'full' }, opts);
     const parsed = parsePayload(full.payload);
-    return { meta: normaliseMessage(full), ...parsed, inlineData: async (a) => a.data ? b64urlDecode(a.data) : b64urlDecode((await this.client.get(`/messages/${id}/attachments/${a.attachmentId}`)).data) };
+    return { meta: normaliseMessage(full), ...parsed, inlineData: async (a) => a.data ? b64urlDecode(a.data) : b64urlDecode((await this.client.get(`/messages/${id}/attachments/${a.attachmentId}`, null, opts)).data) };
   }
   async getAttachment(id, attachmentId) { return b64urlDecode((await this.client.get(`/messages/${id}/attachments/${attachmentId}`)).data); }
   async send({ raw, threadId }) {

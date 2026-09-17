@@ -13,6 +13,7 @@ const { autoconfig, ImapProvider } = require('./providers/imap');
 const { buildDoc } = require('./printDoc');
 const { runRules } = require('./rules');
 const { createLogger } = require('./logger');
+const { PRIORITY } = require('./gmail/api');
 const { cleanUrl } = require('./links');
 const { exportMbox } = require('./exportMbox');
 const achievements = require('./achievements');
@@ -61,7 +62,7 @@ const composeWins = new Map();   // id → { win, payload }
 let composeSeq = 0;
 const syncStatus = {};
 let lastCheckedAt = null;
-let syncTimer, snoozeTimer, changeTimer, outboxTimer, housekeepTimer;
+let syncTimer, snoozeTimer, changeTimer, outboxTimer, housekeepTimer, prefetchTimer;
 const pendingSends = new Map();  // id → { timer, payload, subject }
 let sendSeq = 0;
 const messageWins = new Map();
@@ -418,6 +419,31 @@ function queueSend(payload) {
   send('send:state', { id, state: 'pending', subject: payload.subject, until: Date.now() + delay, draftId: payload.draftId, accountId: payload.accountId });
   return id;
 }
+/**
+ * Quietly download the bodies of recent inbox mail so opening it is instant instead of a round trip.
+ * Lowest priority of anything that talks to Gmail, a few at a time, and never while an account is
+ * still doing its first sync — the backfill has better uses for the quota.
+ */
+const PREFETCH_BATCH = 4;
+const prefetchFailed = new Set();
+let prefetching = false;
+async function prefetchBodies() {
+  if (DEMO || prefetching) return;
+  if (settings.get().prefs.prefetchBodies === false) return;
+  prefetching = true;
+  try {
+    for (const acc of db.listAccounts()) {
+      if (!acc.initial_done || syncing.has(acc.id)) continue;
+      const ids = db.bodiesToPrefetch(acc.id, PREFETCH_BATCH + prefetchFailed.size).filter(id => !prefetchFailed.has(`${acc.id}:${id}`)).slice(0, PREFETCH_BATCH);
+      for (const id of ids) {
+        try { await actions.getMessage(acc.id, id, { priority: PRIORITY.prefetch, quiet: true }); }
+        catch (e) { prefetchFailed.add(`${acc.id}:${id}`); log(`prefetch ${id}: ${e.message}`); }
+      }
+    }
+  } catch (e) { log('prefetch:', e.message); }
+  finally { prefetching = false; }
+}
+
 function checkAchievements() {
   if (settings.get().prefs.achievements === false) return [];
   try {
@@ -702,6 +728,7 @@ app.whenReady().then(async () => {
   setInterval(() => { try { for (const f of actions.checkFollowups()) { if (!f.notified && Notification.isSupported() && settings.get().prefs.notifications !== false) { const n = new Notification({ title: 'No reply yet: ' + (f.subject || '(no subject)'), body: `Sent to ${f.to} on ${new Date(f.createdAt).toLocaleDateString('en-GB')} — follow up?` }); n.on('click', () => { showMainWindow(); send('app:open-followups', {}); }); n.show(); actions.markFollowupNotified(f.id); } } } catch (e) { log('followups:', e.message); } }, 5 * 60000);
   setInterval(() => actions.processScheduled().then(n => { if (n) log(`scheduled: sent ${n}`); }).catch(e => log('scheduled:', e.message)), 30000);
   setInterval(checkAchievements, 60000); setTimeout(checkAchievements, 20000);
+  prefetchTimer = setInterval(() => prefetchBodies(), 20000);
   outboxTimer = setInterval(() => actions.processOutbox().then(n => { if (n) log(`outbox: sent ${n}`); }).catch(e => log('outbox:', e.message)), 60000);
   housekeepTimer = setTimeout(housekeeping, 90000); setInterval(housekeeping, 24 * 3600000);
   snoozeTimer = setInterval(() => actions.wakeDueSnoozes().then(n => { if (n) notifyChanged(); }).catch(e => log('snooze wake:', e.message)), 30000);
@@ -726,4 +753,4 @@ function replyIdentity(accountId, m) {
 ipcMain.on('quick-reply', (_e, accountId, id, text) => { actions.getMessage(accountId, id).then(async (m) => { if (!m) return; const to = m.replyTo || m.fromEmail; const subj = /^re:/i.test(m.subject || '') ? m.subject : `Re: ${m.subject || ''}`; await actions.send({ accountId, from: replyIdentity(accountId, m), to, subject: subj, text, replyTo: { accountId, id }, mode: 'reply' }); }).catch(e => log('notification reply:', e.message)); });
 // With a tray icon Tomail keeps running with no windows open, so the last window closing is not a quit.
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !tray) app.quit(); });
-app.on('before-quit', () => { isQuitting = true; clearInterval(syncTimer); clearInterval(snoozeTimer); clearInterval(outboxTimer); clearTimeout(housekeepTimer); for (const a of db?.listAccounts?.() || []) { try { accounts.providers.get(a.id)?.cancel(); } catch {} } try { db?.close(); } catch {} });
+app.on('before-quit', () => { isQuitting = true; clearInterval(syncTimer); clearInterval(snoozeTimer); clearInterval(outboxTimer); clearInterval(prefetchTimer); clearTimeout(housekeepTimer); for (const a of db?.listAccounts?.() || []) { try { accounts.providers.get(a.id)?.cancel(); } catch {} } try { db?.close(); } catch {} });

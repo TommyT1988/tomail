@@ -491,3 +491,31 @@ test('opening a message: slow inline images do not hold it up, they arrive after
   const after = db.getMessage(a.id, 'big');
   assert.doesNotMatch(after.bodyHtml, /cid:img/, 'and every image is embedded in the stored copy');
 });
+
+test('read-ahead picks the right messages and stays quiet', async () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const at = (id, ts, labels, size = 1000) => ({ ...normaliseMessage(msg(id, labels)), internalDate: ts, size });
+  db.upsertMessages(a.id, [
+    at('p1', 5000, ['INBOX']), at('p2', 4000, ['INBOX']), at('p3', 3000, ['INBOX']),
+    at('huge', 4500, ['INBOX'], 9 * 1024 * 1024),     // too big to read ahead
+    at('sent', 4800, ['SENT']),                        // not the inbox
+    at('zzz', 4900, ['INBOX']),                        // snoozed away
+  ]);
+  db.setSnooze(a.id, ['zzz'], Date.now() + 3600000);
+  assert.deepEqual(db.bodiesToPrefetch(a.id, 10), ['p1', 'p2', 'p3'], 'newest inbox first, nothing oversized or snoozed');
+  assert.deepEqual(db.bodiesToPrefetch(a.id, 2), ['p1', 'p2'], 'and only as many as asked for');
+
+  let changes = 0, askedPriority;
+  const provider = { fetchFull: async (id, opts) => { askedPriority = opts?.priority; return { meta: null, html: '<p>body</p>', text: 'body', calendar: null, attachments: [], inlineData: async () => Buffer.alloc(0) }; } };
+  const actions = new Actions({ db, providers: () => provider, onChange: () => { changes++; }, log: () => {} });
+
+  const { PRIORITY } = require('../electron/gmail/api');
+  await actions.getMessage(a.id, 'p1', { priority: PRIORITY.prefetch, quiet: true });
+  assert.equal(askedPriority, PRIORITY.prefetch, 'read-ahead asks in the lowest lane');
+  assert.equal(changes, 0, 'and does not churn the message list');
+  assert.deepEqual(db.bodiesToPrefetch(a.id, 10), ['p2', 'p3'], 'a fetched body drops off the queue');
+
+  await actions.getMessage(a.id, 'p2');              // a real click
+  assert.equal(changes, 1, 'which does notify');
+});

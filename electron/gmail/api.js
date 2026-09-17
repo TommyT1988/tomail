@@ -9,7 +9,7 @@ const BATCH_URL = 'https://www.googleapis.com/batch/gmail/v1';
 const UNITS_PER_SEC = 200, BURST = 1000;
 // Anything the person is waiting for goes first. A backfill batch reserves 200 units at a time, and
 // when the bucket is empty that batch waits about a second; a plain queue made every click wait behind it.
-const PRIORITY = { interactive: 10, background: 0 };
+const PRIORITY = { interactive: 10, background: 0, prefetch: -10 };   // prefetch yields to the sync, the sync yields to you
 class Budget {
   constructor() { this.tokens = BURST; this.at = Date.now(); this.waiting = []; this.seq = 0; this.timer = null; }
   take(cost, priority = PRIORITY.interactive) {
