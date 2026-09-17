@@ -44,12 +44,14 @@ jobs:
           REL=$(curl -sf -H "Authorization: token $GH_TOKEN" "$API/releases/tags/$TAG")
           ID=$(printf '%s' "$REL" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
           NAMES=$(printf '%s' "$REL" | python3 -c 'import json,sys; print("\n".join(a["name"] for a in json.load(sys.stdin)["assets"]))')
+          # latest-mac.yml is deliberately NOT required: electron-updater can only update macOS from a
+          # .zip, which we don't publish while the build is unsigned, so the file may not be generated.
           MISSING=""
           for f in "Tomail-$VER-win-x64.exe" "Tomail-$VER-win-arm64.exe" "Tomail-$VER-win.exe" \
                    "Tomail-$VER-mac-x64.dmg" "Tomail-$VER-mac-arm64.dmg" \
                    "Tomail-$VER-linux-x86_64.AppImage" "Tomail-$VER-linux-arm64.AppImage" \
                    "Tomail-$VER-linux-amd64.deb" "Tomail-$VER-linux-arm64.deb" \
-                   latest.yml latest-mac.yml latest-linux.yml latest-linux-arm64.yml; do
+                   latest.yml latest-linux.yml latest-linux-arm64.yml; do
             printf '%s\n' "$NAMES" | grep -qx "$f" || MISSING="$MISSING $f"
           done
           if [ -n "$MISSING" ]; then
