@@ -221,13 +221,15 @@ function Header({ message, onPrint, extra, onPopOut, toast, onReplyTo, onQuickRe
 }
 
 /** One message in a conversation stack. Fetches its body when first expanded. */
-function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo, toast }) {
+const trustedSender = (prefs, email) => !!email && (prefs?.imageSenders || []).includes(email.toLowerCase());
+
+function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo, toast, onTrustSender }) {
   const [full, setFull] = useState(m.bodyFetched ? m : null);
   const [allow, setAllow] = useState(false);
   useEffect(() => { if (open && (!full || !full.bodyFetched)) window.mail.messages.get(m.accountId, m.id).then(setFull).catch(() => {}); }, [open, m.accountId, m.id]); // eslint-disable-line
   useEffect(() => { if (m.bodyFetched) setFull(m); }, [m]);
   const body = full || m;
-  const allowRemote = prefs?.loadRemoteImages || allow;
+  const allowRemote = prefs?.loadRemoteImages || allow || trustedSender(prefs, m.fromEmail);
   const initials = (m.fromName || m.fromEmail || '?').split(/\s+/).map(s => s[0]).join('').slice(0, 2).toUpperCase();
   return (
     <div className={'card' + (open ? ' open' : '')}>
@@ -243,7 +245,7 @@ function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo, t
         <div className="cb">
           {body.calendar && <InviteCard m={body} onRespond={onRespond} />}
           <Attachments m={body} toast={toast} />
-          {hasRemoteImages(body.bodyHtml) && !allowRemote && <div className="imgbar"><Icon name="image" size={13} /> Remote images blocked. <button onClick={() => setAllow(true)}>Load images</button></div>}
+          {hasRemoteImages(body.bodyHtml) && !allowRemote && <div className="imgbar"><Icon name="image" size={13} /> Remote images blocked. <button onClick={() => setAllow(true)}>Load images</button>{onTrustSender && m.fromEmail && <button onClick={() => onTrustSender(m.fromEmail)}>Always load from {m.fromEmail}</button>}</div>}
           {body.bodyHtml ? <BodyFrame html={body.bodyHtml} allowRemote={allowRemote} autoHeight /> : <div className="plain">{body.bodyText || (body.bodyFetched ? '' : 'Loading…')}</div>}
           <div className="cactions">
             <button onClick={() => onReplyTo(body, 'reply')}><Icon name="reply" size={12} /> Reply</button>
@@ -257,7 +259,7 @@ function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo, t
   );
 }
 
-export default function ReadingPane({ message, thread, loading, prefs, error, onRespond, onPrint, onReplyTo, onPopOut, onOpenMessage, onRuleFromSender, toast, quickReply }) {
+export default function ReadingPane({ message, thread, loading, prefs, error, onRespond, onPrint, onReplyTo, onPopOut, onOpenMessage, onRuleFromSender, toast, quickReply, onTrustSender }) {
   const [allow, setAllow] = useState({});
   const [senderInfo, setSenderInfo] = useState(null);
   const [seed, setSeed] = useState(null);
@@ -265,7 +267,7 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
   const [qrOpen, setQrOpen] = useState(false);
   useEffect(() => { setQrOpen(!!quickReply); }, [message?.id, quickReply]);
   useEffect(() => { if (thread?.length) setOpenIds(new Set([thread[thread.length - 1].id, ...thread.filter(m => m.unread).map(m => m.id)])); }, [thread?.map(m => m.id).join(',')]); // eslint-disable-line
-  const allowRemote = !!(prefs?.loadRemoteImages || (message && allow[message.id]));
+  const allowRemote = !!(prefs?.loadRemoteImages || (message && (allow[message.id] || trustedSender(prefs, message.fromEmail))));
   if (!message) return <div className="read"><div className="empty"><div className="big"><Icon name="mail" size={56} style={{ strokeWidth: 1 }} /></div><div>{loading ? 'Loading…' : 'Select a message to read'}</div></div></div>;
 
   if (thread && thread.length > 1) {
@@ -288,7 +290,7 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
         {latest.bodyFetched && <PhishingBanner message={latest} senderInfo={senderInfo} />}
         {latest.bodyFetched && <AiPanel message={latest} thread={thread} onSuggest={(t) => setSeed({ text: t, at: Date.now() })} />}
         <div className="thread">
-          {thread.map(m => <ThreadCard key={m.id} m={m.id === message.id ? message : m} open={openIds.has(m.id)} prefs={prefs} onRespond={onRespond} onPrint={onPrint} onReplyTo={onReplyTo} toast={toast}
+          {thread.map(m => <ThreadCard key={m.id} m={m.id === message.id ? message : m} open={openIds.has(m.id)} prefs={prefs} onRespond={onRespond} onPrint={onPrint} onReplyTo={onReplyTo} toast={toast} onTrustSender={onTrustSender}
             onToggle={() => setOpenIds(s => { const n = new Set(s); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })} />)}
           {!latest.labels?.includes('SENT') && <QuickReply message={latest} toast={toast} autoFocus={quickReply} seed={seed} open={qrOpen} setOpen={setQrOpen} />}
         </div>
@@ -305,7 +307,7 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
       {message.calendar && <InviteCard m={message} onRespond={onRespond} />}
       <Attachments m={message} toast={toast} />
       {error && <div className="imgbar" style={{ background: '#fde8e6', borderColor: '#f3b5ae' }}>⚠ {error}</div>}
-      {hasRemoteImages(message.bodyHtml) && !allowRemote && <div className="imgbar"><Icon name="image" size={13} /> Remote images are blocked in this message. <button onClick={() => setAllow(a => ({ ...a, [message.id]: true }))}>Load images</button></div>}
+      {hasRemoteImages(message.bodyHtml) && !allowRemote && <div className="imgbar"><Icon name="image" size={13} /> Remote images are blocked in this message. <button onClick={() => setAllow(a => ({ ...a, [message.id]: true }))}>Load images</button>{onTrustSender && message.fromEmail && <button title="Remember this sender — their images load without asking (Settings → General to undo)" onClick={() => onTrustSender(message.fromEmail)}>Always load from {message.fromEmail}</button>}</div>}
       {!message.bodyFetched && loading && <div className="plain muted">Downloading message…</div>}
       {message.bodyHtml ? <BodyFrame html={message.bodyHtml} allowRemote={allowRemote} /> : <div className="plain">{message.bodyText || (message.bodyFetched ? '' : message.snippet)}</div>}
       {message.bodyFetched && !message.labels?.includes('SENT') && <QuickReply message={message} toast={toast} autoFocus={quickReply} seed={seed} open={qrOpen} setOpen={setQrOpen} />}

@@ -287,27 +287,27 @@ export default function App() {
   const draftCounts = useMemo(() => { const o = { all: drafts.local.length + drafts.remote.length }; for (const d of [...drafts.local, ...drafts.remote]) o[d.accountId] = (o[d.accountId] || 0) + 1; return o; }, [drafts]);
   const selLabels = labels[selected[0]?.accountId || view.accountId] || [];
 
+  const trustSender = (email) => {
+    const list = [...new Set([...(prefs?.imageSenders || []), email.toLowerCase()])];
+    mail.settings.set({ prefs: { imageSenders: list } }).then(s => { setPrefs(s.prefs); toast(`Images from ${email} will always load`); }).catch(e => toast(e.message, true));
+  };
   if (locked) return <LockScreen onUnlock={() => { setLocked(false); lastActivity.current = Date.now(); }} />;
   return (
     <div className="app">
-      <div className="topbar">
+      <div className="toolbar topbar">
+        {accounts.length > 1
+          ? <Dropdown className="newdd" btnClass="new-btn" label={<><Icon name="plus" /> New</>}>{accounts.map(a => <MI key={a.id} onClick={() => mail.compose.open({ mode: 'new', accountId: a.id })}><Icon name="mail" /> from {a.email}</MI>)}</Dropdown>
+          : <button className="new-btn" onClick={() => openCompose('new')} disabled={!accounts.length}><Icon name="plus" /> New</button>}
+        <button onClick={() => { mail.sync.now(); toast('Checking for new mail…'); }} disabled={!accounts.length || info?.demo}><span className="ico"><Icon name="refresh" /></span>Refresh</button>
         <div className="search">
           <div className="wrap">
-            <input type="text" placeholder="Search  (Enter = local · Deep search = on the server, inside attachments)" value={search} onChange={e => setSearch(e.target.value)}
+            <input type="text" placeholder="Search" title="Enter searches locally · Deep search asks the mail server and looks inside attachments" value={search} onChange={e => setSearch(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') runSearch(false); if (e.key === 'Escape') { setSearch(''); if (view.kind === 'search' || view.kind === 'ids') setView(HOME); } }} />
             {search && <button className="clear" onClick={() => { setSearch(''); if (view.kind === 'search' || view.kind === 'ids') setView(HOME); }}>✕</button>}
           </div>
           <button onClick={() => runSearch(true)} disabled={!search.trim() && !view.filters} title="Search on the mail server — bodies and attachment contents"><Icon name="search" /> Deep search</button>
           <FilterMenu filters={view.filters} setFilters={setFilters} accounts={accounts} labels={Object.values(labels).flat()} />
         </div>
-        <div className="right"><button onClick={() => setSettingsOpen(true)} title="Settings"><Icon name="settings" size={14} /> Settings</button></div>
-      </div>
-      <div className="toolbar">
-        {accounts.length > 1
-          ? <Dropdown className="newdd" btnClass="new-btn" label={<><Icon name="plus" /> New</>}>{accounts.map(a => <MI key={a.id} onClick={() => mail.compose.open({ mode: 'new', accountId: a.id })}><Icon name="mail" /> from {a.email}</MI>)}</Dropdown>
-          : <button className="new-btn" onClick={() => openCompose('new')} disabled={!accounts.length}><Icon name="plus" /> New</button>}
-        <button onClick={() => { mail.sync.now(); toast('Checking for new mail…'); }} disabled={!accounts.length || info?.demo}><span className="ico"><Icon name="refresh" /></span>Refresh</button>
-        <span className="spacer" />
         <MarkMenu disabled={!hasSel} onMark={doMark} inSpam={view.labelId === 'SPAM'} />
         <span className="sep" />
         {inTrash ? <button className="act arch" disabled={!hasSel} onClick={doRestore}><span className="ico"><Icon name="inbox" /></span>Restore</button>
@@ -320,6 +320,8 @@ export default function App() {
           onNewLabel={(n) => mail.labels.create(selected[0]?.accountId || view.accountId || accounts[0]?.id, n).then(() => toast('Folder created')).catch(e => toast(e.message, true))} />
         <span className="sep" />
         <button className="act del" disabled={!hasSel} onClick={doTrash} title={inTrash ? 'Delete permanently' : 'Move to Trash'}><span className="ico"><Icon name="trash" /></span>{inTrash ? 'Delete forever' : 'Delete'}</button>
+        <span className="sep" />
+        <button onClick={() => setSettingsOpen(true)} title="Settings"><span className="ico"><Icon name="settings" size={14} /></span>Settings</button>
       </div>
       <div className="body" style={{ gridTemplateColumns: `${sideW}px 6px 1fr` }}>
         {sideW > 0 ? <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} onReorder={(ids) => mail.accounts.reorder(ids).then(loadMeta)} outboxCount={outbox.length} scheduledCount={scheduled.length} onOpenTab={(v) => openTab(v)} followups={{ total: followups.length, due: followups.filter(f => f.status === 'due').length }} onLabelMenu={(e, accountId, l) => setLabelMenu({ x: e.clientX, y: e.clientY, accountId, label: l })} /> : <div />}
@@ -368,7 +370,7 @@ export default function App() {
                   </div></div>); })()
                   : view.kind === 'outbox' && selected.length === 1 ? <div className="read"><div className="empty"><div className="big"><Icon name="send" size={56} style={{ strokeWidth: 1 }} /></div><div>Waiting for a connection{itemsRef.current.find(i => i.id === selected[0].id)?.snippet ? ': ' + itemsRef.current.find(i => i.id === selected[0].id).snippet : ''}</div><div><button className="primary" onClick={() => openItem(itemsRef.current.find(i => i.id === selected[0].id))}>Send now</button> <button onClick={() => { const it = itemsRef.current.find(i => i.id === selected[0].id); mail.outbox.remove(it.outboxId).then(() => loadList(view)); }}>Delete</button></div></div></div>
                   : view.kind === 'drafts' && selected.length === 1 ? <div className="read"><div className="empty"><div className="big"><Icon name="edit" size={56} style={{ strokeWidth: 1 }} /></div><div><button className="primary" onClick={() => openItem(itemsRef.current.find(i => i.id === selected[0].id))}>Open draft</button> <button onClick={() => { const it = itemsRef.current.find(i => i.id === selected[0].id); if (it?.draftId) mail.drafts.remove(it.draftId).then(() => loadList(view)); else if (it?.remoteDraft) mail.actions.trash([{ accountId: it.accountId, id: it.id }]); }}>Delete</button></div></div></div>
-                  : <ReadingPane message={message} thread={thread} loading={msgLoading} prefs={prefs} error={msgError}
+                  : <ReadingPane message={message} thread={thread} loading={msgLoading} prefs={prefs} error={msgError} onTrustSender={trustSender}
                     onRespond={async (m, p) => { try { await mail.actions.respondInvite(m.accountId, m.id, p); toast('Reply sent to the organiser'); const full = await mail.messages.get(m.accountId, m.id); setMessage(cur => cur?.id === m.id ? full : cur); } catch (e) { toast(e.message, true); } }}
                     onPrint={(m) => mail.messages.print(m.accountId, m.id).catch(e => toast(e.message, true))} onReplyTo={(m, mode) => openCompose(mode, m)} onPopOut={(m) => mail.messages.openWindow(m.accountId, m.id)} toast={toast} quickReply={quickReplyFocus}
                     onOpenMessage={(r) => { setView({ kind: 'all', accountId: r.accountId }); setTimeout(() => setSelected([{ accountId: r.accountId, id: r.id }]), 300); }}

@@ -22,13 +22,14 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 a { color: var(--accent); }
 .muted { color: var(--muted); } .faint { color: var(--faint); }
 
-.app { display: grid; grid-template-rows: 44px 38px 1fr 26px; height: 100%; }
+.app { display: grid; grid-template-rows: 44px 1fr 26px; height: 100%; }
 /* ── top bar ── */
 .topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--border); background: #fafafa; }
 .topbar .burger { font-size: 18px; padding: 2px 8px; }
-.topbar .search { flex: 1; display: flex; justify-content: center; gap: 6px; }
-.topbar .search input { width: 440px; max-width: 60vw; padding: 5px 30px 5px 10px; }
-.topbar .search .wrap { position: relative; }
+.topbar .search { flex: 1; display: flex; justify-content: center; gap: 6px; margin: 0 8px; min-width: 0; }
+.toolbar.topbar { min-width: 0; overflow: hidden; white-space: nowrap; }
+.topbar .search input { width: 100%; padding: 5px 30px 5px 10px; box-sizing: border-box; }
+.topbar .search .wrap { position: relative; flex: 1 1 440px; max-width: 440px; min-width: 140px; }
 .topbar .search .clear { position: absolute; right: 4px; top: 3px; padding: 2px 6px; color: var(--muted); }
 .topbar .title { position: absolute; left: 50%; transform: translateX(-50%); top: 0; font-size: 13px; color: var(--muted); }
 
@@ -232,6 +233,7 @@ button.go:hover:not(:disabled) { background: #19662a; }
 .chips { display: flex; gap: 6px; padding: 4px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; align-items: center; font-size: 12px; }
 .chips .chip { background: var(--accent-bg); color: var(--accent); border-radius: 12px; padding: 1px 8px; display: inline-flex; gap: 4px; align-items: center; }
 .chips .chip button { padding: 0 2px; color: inherit; }
+.chips.inline { padding: 0; border: 0; }
 .fmenu .frow { display: grid; grid-template-columns: 90px 1fr; gap: 6px; align-items: center; padding: 3px 12px; }
 .fmenu .frow label { color: var(--muted); font-size: 12px; }
 .fmenu .frow input, .fmenu .frow select { width: 100%; }

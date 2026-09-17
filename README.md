@@ -71,7 +71,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Outbox: no connection? The message waits and goes out when you're back online
 - Per-account signatures
 
-<p align="center"><img src="docs/screenshots/compose-4.png" width="700" alt="Compose window"></p>
+<p align="center"><img src="docs/screenshots/compose-5.png" width="700" alt="Compose window"></p>
 <p align="center"><img src="docs/screenshots/window-5.png" width="700" alt="A message in its own window"></p>
 
 **✨ Local AI (optional)**
@@ -87,7 +87,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Operators: `from:` `to:` `subject:` `in:folder` `is:unread` `is:flagged` `has:attachment` `after:2026-01-01` `before:2026-02-01`, plus a Filters menu
 - **Deep search** runs the query on the server (Gmail syntax, inside attachments for Gmail)
 
-<p align="center"><img src="docs/screenshots/settings-4.png" width="800" alt="Settings"></p>
+<p align="center"><img src="docs/screenshots/settings-5.png" width="800" alt="Settings"></p>
 
 **Everything else**
 - Multiple accounts of either kind with a merged All Inboxes view
@@ -197,7 +197,7 @@ test/                     node:test suite (db, mime, batch parsing, sync, action
 
 | Version | Highlights |
 |---|---|
-| 0.9.7 | One compact message header with all the reply actions in it (no more duplicate Reply buttons), Electron 44.4 and current dependencies, and a release check that only publishes a complete build |
+| 0.9.7 | One bar across the top with search in the middle, one compact message header with all the reply actions in it (no more duplicate Reply buttons), "always load images from this sender", Electron 44.4 and current dependencies, and a release check that only publishes a complete build |
 | 0.9.6 | Proton Mail via Bridge · edit the quoted original when replying · a rate limiter that slows down when Gmail says to · resizable folder list, Reply at the top of a message, a version button that checks for updates, and some colour |
 | 0.9 | Tray icon with start-at-login, remembered window position, send-as aliases, oldest-first that opens on today, a settings dialog that stays put, new mail during a first sync, read-ahead so clicks are instant, and a mailbox of 200,000 that stops stalling |
 | 0.8 | Local AI via Ollama: summaries, suggested replies, drafting in your tone, rewriting, rules from a sentence |

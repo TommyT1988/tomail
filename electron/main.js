@@ -302,7 +302,7 @@ function createWindow() {
         await wait(1500); await shot('1-inbox.png');
         await js(`(() => { const r = document.querySelectorAll('.row')[5]; if (r) r.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); })()`);
         await wait(1200); await shot('2-reading.png');
-        await js(`(() => { const b = [...document.querySelectorAll('.toolbar button')].find(b => b.textContent.includes('Reply') && !b.textContent.includes('All')); b && b.click(); })()`);
+        await js(`(() => { const b = [...document.querySelectorAll('.read .hdr .hbtns button')].find(b => b.textContent.includes('Reply')); b && b.click(); })()`);
         await wait(1800);
         { const cw = [...composeWins.values()][0]?.win; if (cw && !cw.isDestroyed()) { fs.writeFileSync(path.join(dir, '3-compose.png'), (await cw.webContents.capturePage()).toPNG()); const rec = [...composeWins.values()][0]; rec.allowClose = true; cw.close(); } }
         await wait(300);

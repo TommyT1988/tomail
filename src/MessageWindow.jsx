@@ -35,7 +35,8 @@ export default function MessageWindow({ accountId, id }) {
       <div className="main" style={{ minHeight: 0 }}>
         {error ? <div className="empty">{error}</div> : <ReadingPane message={message} thread={thread} loading={!message} prefs={prefs} error={null}
           onRespond={async (m, p) => { try { await window.mail.actions.respondInvite(m.accountId, m.id, p); toast('Reply sent to the organiser'); load(); } catch (e) { toast(e.message, true); } }}
-          toast={toast} onPrint={(m) => window.mail.messages.print(m.accountId, m.id)} onReplyTo={(m, mode) => window.mail.compose.open({ mode, accountId: m.accountId, originalId: m.id })} />}
+          toast={toast} onPrint={(m) => window.mail.messages.print(m.accountId, m.id)}
+          onTrustSender={(email) => window.mail.settings.set({ prefs: { imageSenders: [...new Set([...(prefs?.imageSenders || []), email.toLowerCase()])] } }).then(s => { setPrefs(s.prefs); toast(`Images from ${email} will always load`); }).catch(e => toast(e.message, true))} onReplyTo={(m, mode) => window.mail.compose.open({ mode, accountId: m.accountId, originalId: m.id })} />}
       </div>
       {toastMsg && <div className={'toast' + (toastMsg.err ? ' err' : '')}>{toastMsg.m}</div>}
     </div>
