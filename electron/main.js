@@ -688,6 +688,7 @@ app.whenReady().then(async () => {
   settings = new Settings(path.join(userData, 'settings.json'));
   applyTheme();
   db = new MailDb(DEMO ? ':memory:' : path.join(userData, 'mail.sqlite'));
+  if (db.labelDateBackfillMs) log(`folder index filled in for the existing mailbox (${db.labelDateBackfillMs}ms, one-off)`);
   accounts = new AccountManager({ db, settings, safeStorage, log });
   if (DEMO) { seedDemo(db); const dp = new DemoProvider(db); accounts.provider = () => dp; }
   actions = new Actions({ db, providers: (id) => accounts.provider(id), onChange: notifyChanged, log });

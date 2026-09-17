@@ -420,3 +420,31 @@ test('counts: totals, unread, snoozed and trashed all land in the right place', 
   assert.equal(d.favourites.inboxUnread, 2, 'c3 plus the woken c6');
   assert.equal(d.labels[a.id].INBOX.total, 4);
 });
+
+test('folder listing: the date carried on the label row stays true, and the index is used', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const at = (id, ts, labels) => ({ ...normaliseMessage(msg(id, labels)), internalDate: ts });
+  db.upsertMessages(a.id, [at('f1', 3000, ['INBOX']), at('f2', 1000, ['INBOX']), at('f3', 2000, ['INBOX'])]);
+  const dates = () => db.listMessages({ kind: 'label', accountId: a.id, labelId: 'INBOX' }, { limit: 10 }).map(m => m.date);
+  assert.deepEqual(dates(), [3000, 2000, 1000], 'newest first');
+
+  // a label added later carries that message's date, not the time it was filed
+  db.upsertMessages(a.id, [at('f4', 2500, ['ARCHIVE'])]);
+  db.applyLabelChange(a.id, ['f4'], { add: ['INBOX'] });
+  assert.deepEqual(dates(), [3000, 2500, 2000, 1000], 'moved-in mail sorts by its own date');
+
+  db.applyLabelChange(a.id, ['f1'], { remove: ['INBOX'] });
+  assert.deepEqual(dates(), [2500, 2000, 1000], 'and leaves when the label goes');
+
+  // re-syncing a message with a corrected date updates the label rows too
+  db.upsertMessages(a.id, [at('f2', 9000, ['INBOX'])]);
+  assert.deepEqual(dates(), [9000, 2500, 2000], 'a changed date re-sorts');
+  assert.equal(db.prep('SELECT count(*) AS n FROM message_labels WHERE d IS NULL').get().n, 0, 'never left unset');
+
+  const plan = db.prep('EXPLAIN QUERY PLAN ' +
+    `SELECT m.rid FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id AND ml.label_id = ?
+     WHERE m.account_id = ? AND m.snooze_until IS NULL ORDER BY ml.d DESC LIMIT 100`).all('INBOX', a.id).map(r => r.detail).join(' | ');
+  assert.match(plan, /message_labels_date/, 'walks the folder index');
+  assert.doesNotMatch(plan, /TEMP B-TREE/, 'and never sorts the whole folder to take one page');
+});

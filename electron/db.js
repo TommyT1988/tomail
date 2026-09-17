@@ -107,6 +107,9 @@ CREATE TABLE IF NOT EXISTS message_labels (
   account_id INTEGER NOT NULL,
   message_id TEXT NOT NULL,
   label_id TEXT NOT NULL,
+  -- the message's date, carried here so a folder can be read newest-first straight off the index
+  -- instead of sorting the whole folder to take one page (see messages_labels_date below)
+  d INTEGER,
   PRIMARY KEY (account_id, message_id, label_id)
 );
 CREATE INDEX IF NOT EXISTS message_labels_label ON message_labels(account_id, label_id);
@@ -205,6 +208,16 @@ class MailDb {
     const add = (t, col, def) => { if (!cols(t).has(col)) this.db.exec(`ALTER TABLE ${t} ADD COLUMN ${col} ${def}`); };
     add('accounts', 'kind', "TEXT NOT NULL DEFAULT 'gmail'"); add('accounts', 'imap_json', 'TEXT'); add('accounts', 'signature', 'TEXT'); add('accounts', 'scopes', 'TEXT');
     add('accounts', 'aliases', 'TEXT'); add('drafts', 'from_email', 'TEXT');
+    add('message_labels', 'd', 'INTEGER');
+    this.db.exec('CREATE INDEX IF NOT EXISTS message_labels_date ON message_labels(account_id, label_id, d DESC)');
+    // one-off for mailboxes synced before the column existed
+    if (this.db.prepare('SELECT 1 AS x FROM message_labels WHERE d IS NULL LIMIT 1').get()) {   // _stmts isn't up yet
+      const t0 = Date.now();
+      this.db.exec(`UPDATE message_labels SET d = (SELECT m.internal_date FROM messages m
+        WHERE m.account_id = message_labels.account_id AND m.id = message_labels.message_id) WHERE d IS NULL`);
+      this.db.exec('ANALYZE');
+      this.labelDateBackfillMs = Date.now() - t0;
+    }
     add('labels', 'imap_path', 'TEXT');
     add('messages', 'answered', 'INTEGER NOT NULL DEFAULT 0'); add('messages', 'calendar_json', 'TEXT');
     add('drafts', 'remote_message_id', 'TEXT'); add('contacts', 'source', 'TEXT'); add('messages', 'auth_json', 'TEXT'); add('messages', 'ai_summary', 'TEXT'); add('messages', 'imap_folder', 'TEXT'); add('messages', 'imap_uid', 'INTEGER');
@@ -472,7 +485,7 @@ class MailDb {
         unread=excluded.unread, starred=excluded.starred, labels_json=excluded.labels_json, answered=excluded.answered,
         imap_folder=excluded.imap_folder, imap_uid=excluded.imap_uid, auth_json=coalesce(excluded.auth_json, messages.auth_json)`);
     const delL = this.prep('DELETE FROM message_labels WHERE account_id = ? AND message_id = ?');
-    const insL = this.prep('INSERT OR IGNORE INTO message_labels (account_id, message_id, label_id) VALUES (?,?,?)');
+    const insL = this.prep('INSERT OR IGNORE INTO message_labels (account_id, message_id, label_id, d) VALUES (?,?,?,?)');
     this.tx(() => {
       for (const m of rows) {
         ins.run(accountId, m.id, m.threadId || null, m.historyId || null, m.internalDate || 0, m.size || 0,
@@ -482,7 +495,7 @@ class MailDb {
           m.labels.includes('UNREAD') ? 1 : 0, m.labels.includes('STARRED') ? 1 : 0, JSON.stringify(m.labels), m.answered ? 1 : 0,
           m.imapFolder || null, m.imapUid ?? null, m.auth ? JSON.stringify(m.auth) : null);
         delL.run(accountId, m.id);
-        for (const l of m.labels) insL.run(accountId, m.id, l);
+        for (const l of m.labels) insL.run(accountId, m.id, l, m.internalDate || 0);
         if (m.snoozeUntil) this.adoptSnooze(accountId, m.id, m.snoozeUntil);
       }
       this.harvestContacts(rows);
@@ -495,9 +508,9 @@ class MailDb {
   }
   /** Apply label add/remove to local rows (used by both sync and optimistic UI actions). */
   applyLabelChange(accountId, ids, { add = [], remove = [] }) {
-    const get = this.prep('SELECT labels_json FROM messages WHERE account_id = ? AND id = ?');
+    const get = this.prep('SELECT labels_json, internal_date FROM messages WHERE account_id = ? AND id = ?');
     const upd = this.prep('UPDATE messages SET labels_json = ?, unread = ?, starred = ? WHERE account_id = ? AND id = ?');
-    const insL = this.prep('INSERT OR IGNORE INTO message_labels (account_id, message_id, label_id) VALUES (?,?,?)');
+    const insL = this.prep('INSERT OR IGNORE INTO message_labels (account_id, message_id, label_id, d) VALUES (?,?,?,?)');
     const delL = this.prep('DELETE FROM message_labels WHERE account_id = ? AND message_id = ? AND label_id = ?');
     this.tx(() => {
       for (const id of ids) {
@@ -505,7 +518,7 @@ class MailDb {
         if (!row) continue;
         const set = new Set(JSON.parse(row.labels_json));
         for (const l of remove) { set.delete(l); delL.run(accountId, id, l); }
-        for (const l of add) { set.add(l); insL.run(accountId, id, l); }
+        for (const l of add) { set.add(l); insL.run(accountId, id, l, row.internal_date || 0); }
         const labels = [...set];
         upd.run(JSON.stringify(labels), set.has('UNREAD') ? 1 : 0, set.has('STARRED') ? 1 : 0, accountId, id);
       }
@@ -745,7 +758,9 @@ class MailDb {
 function orderSql(view, m, dateExpr) {
   const s = view.sort || {};
   const dir = s.dir === 'asc' ? 'ASC' : 'DESC';
-  const date = dateExpr || `${m}.internal_date`;
+  // A folder view joins message_labels, which carries the date: ordering by THAT lets SQLite walk the
+  // (account, label, date) index and stop at the page, instead of sorting every message in the folder.
+  const date = dateExpr || (view.kind === 'label' ? 'ml.d' : `${m}.internal_date`);
   switch (s.col) {
     case 'size': return `${m}.size ${dir}, ${date} DESC`;
     case 'from': return `lower(coalesce(nullif(${m}.from_name,''), ${m}.from_email)) ${dir}, ${date} DESC`;
