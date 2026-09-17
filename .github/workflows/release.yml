@@ -41,9 +41,13 @@ jobs:
         run: |
           VER="${TAG#v}"
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
-          REL=$(curl -sf -H "Authorization: token $GH_TOKEN" "$API/releases/tags/$TAG")
-          ID=$(printf '%s' "$REL" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-          NAMES=$(printf '%s' "$REL" | python3 -c 'import json,sys; print("\n".join(a["name"] for a in json.load(sys.stdin)["assets"]))')
+          # NB: /releases/tags/<tag> 404s for a DRAFT release — drafts aren't associated with a tag until
+          # they're published. Find it by listing releases instead, which does include drafts.
+          REL=$(curl -sf -H "Authorization: token $GH_TOKEN" "$API/releases?per_page=100" \
+            | TAG="$TAG" python3 -c 'import json,os,sys; r=[x for x in json.load(sys.stdin) if x["tag_name"]==os.environ["TAG"]]; print(json.dumps(r[0] if r else {}))')
+          ID=$(printf '%s' "$REL" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))')
+          if [ -z "$ID" ]; then echo "No release found for $TAG"; exit 1; fi
+          NAMES=$(printf '%s' "$REL" | python3 -c 'import json,sys; print("\n".join(a["name"] for a in json.load(sys.stdin).get("assets",[])))')
           # latest-mac.yml is deliberately NOT required: electron-updater can only update macOS from a
           # .zip, which we don't publish while the build is unsigned, so the file may not be generated.
           MISSING=""
