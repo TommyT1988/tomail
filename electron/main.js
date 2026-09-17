@@ -77,7 +77,9 @@ function openLink(url) {
 }
 function send(channel, payload) { for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(channel, payload); }
 /** Renderer refresh is expensive on a big mailbox (counts + list); during an initial download coalesce to one event per 10 s. */
-function notifyChanged() {
+function notifyChanged({ now = false } = {}) {
+  // New mail is worth an immediate refresh even mid-backfill, when the throttle below is 10s.
+  if (now) { clearTimeout(changeTimer); changeTimer = null; send('mail:changed', {}); return; }
   if (changeTimer) return;
   const initial = Object.values(syncStatus).some(s => s?.phase === 'initial');
   changeTimer = setTimeout(() => { changeTimer = null; send('mail:changed', {}); }, initial ? 10000 : 300);
@@ -91,7 +93,10 @@ async function syncOne(accountId) {
     const p = accounts.provider(accountId);
     if (p.kind === 'imap' && !p.onPush) p.onPush = () => { clearTimeout(pushTimers.get(accountId)); pushTimers.set(accountId, setTimeout(() => syncOne(accountId).catch(() => {}), 800)); };
     let wasInitial = false;
-    const r = await p.sync((st) => { if (st.phase === 'initial') wasInitial = true; syncStatus[accountId] = st; broadcastStatus(); if (st.phase !== 'error') notifyChanged(); });
+    const r = await p.sync((st) => { if (st.phase === 'initial') wasInitial = true; syncStatus[accountId] = st; broadcastStatus(); if (st.phase !== 'error') notifyChanged(); }, {
+      // mail that lands mid-backfill: show it and notify now, rather than hours later when the backfill ends
+      onNewMail: (ids) => { notifyNewMail(accountId, ids); notifyChanged({ now: true }); },
+    });
     syncStatus[accountId] = { phase: 'idle' };
     if (wasInitial) { try { db.analyze(); log('database statistics refreshed after initial sync'); } catch (e) { log('analyze:', e.message); } }
     lastSyncAt.set(accountId, Date.now());
@@ -298,8 +303,12 @@ function createWindow() {
         await wait(900); await shot('7-dark.png');
         await js(`window.mail.settings.set({ prefs: { theme: 'system' } })`);
         // Oldest-first: clicking Received twice flips the sort — the list must land on TODAY at the bottom.
-        await js(`(() => { document.documentElement.classList.remove('dark'); const th = [...document.querySelectorAll('.cols .th')].find(t => /Received/.test(t.textContent)); if (th) { th.click(); setTimeout(() => th.click(), 400); } })()`);
+        // click Received until it is ASCENDING (the preference persists between demo runs, so a blind toggle isn't deterministic)
+        await js(`(async () => { document.documentElement.classList.remove('dark');
+          const th = () => [...document.querySelectorAll('.cols .th')].find(t => /Received/.test(t.textContent));
+          for (let i = 0; i < 3 && !th()?.textContent.includes('▲'); i++) { th().click(); await new Promise(r => setTimeout(r, 400)); } })()`);
         await wait(2000); await shot('10-oldest-first.png');
+        log('sort state:', await js(`JSON.stringify({ saved: localStorage.getItem('dateSort'), arrow: [...document.querySelectorAll('.cols .th')].find(t => /Received/.test(t.textContent))?.textContent })`));
         log('oldest-first scroll:', await js(`(() => { const el = document.querySelector('.rows'); const g = [...el.querySelectorAll('.grp')].pop(); return JSON.stringify({ atBottom: el.scrollHeight - el.scrollTop - el.clientHeight, lastGroup: g && g.textContent }); })()`));
       } catch (e) { log('screenshot failed:', e.message); }
       app.quit();

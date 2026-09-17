@@ -9,6 +9,7 @@ const { parseAuthResults } = require('../authResults');
 const BATCH = 40;          // 40 × 5 units = 200 units per batch; the client's budget paces to ~1 batch/s
 const PAGE = 500;          // messages.list max
 const PAUSE_MS = 50;       // budget does the real pacing
+const NEW_MAIL_CHECK_MS = 45000;   // a 200k-message backfill takes hours — look for new mail this often while it runs
 
 /** Gmail message resource (format=metadata|full) → normalised row for db.upsertMessages */
 function normaliseMessage(m) {
@@ -31,9 +32,15 @@ class AccountSync {
   /**
    * @param {object} o  { db, client, account, onProgress(status), log }
    */
-  constructor({ db, client, account, onProgress = () => {}, log = () => {} }) {
+  constructor({ db, client, account, onProgress = () => {}, log = () => {}, newMailCheckMs = NEW_MAIL_CHECK_MS }) {
     this.db = db; this.client = client; this.accountId = account.id; this.onProgress = onProgress; this.log = log;
     this.running = false; this.cancelled = false;
+    this.onNewMail = () => {};
+    this.didInitial = false;         // this run included a backfill pass
+    this.newFromIncremental = [];    // inbox ids the history deltas found — genuinely new mail, not backfill
+    this.lastNewCheck = 0;
+    this.newMailCheckMs = newMailCheckMs;
+    this.historyLost = false;
   }
   get account() { return this.db.getAccount(this.accountId); }
   cancel() { this.cancelled = true; }
@@ -48,6 +55,7 @@ class AccountSync {
   async run() {
     if (this.running) return;
     this.running = true; this.cancelled = false;
+    this.didInitial = false; this.newFromIncremental = []; this.historyLost = false;
     try {
       const acct = this.account;
       if (!acct) return;
@@ -66,6 +74,8 @@ class AccountSync {
   }
 
   async initial() {
+    this.didInitial = true;
+    this.lastNewCheck = Date.now();
     let acct = this.account;
     if (!acct.history_id) {
       // Pin the history cursor BEFORE listing so nothing that changes mid-sync is lost.
@@ -89,6 +99,8 @@ class AccountSync {
         await this.fetchAndStore(chunk);
         synced += chunk.length;
         this.onProgress({ phase: 'initial', synced, total: acct.total_estimate });
+        await this.checkNewMail();
+        this.onProgress({ phase: 'initial', synced, total: acct.total_estimate });
         await sleep(PAUSE_MS);
       }
       synced += ids.length - need.length;
@@ -99,6 +111,23 @@ class AccountSync {
     this.db.updateAccount(this.accountId, { initial_done: 1, next_page_token: null });
     // Anything that changed during the (possibly long) initial pass:
     await this.incremental();
+  }
+
+  /**
+   * Mail that arrives while the backfill is running must not wait for it to finish: every
+   * NEW_MAIL_CHECK_MS, spend one cheap history.list call on the delta and store what it finds.
+   */
+  async checkNewMail() {
+    if (this.cancelled || this.historyLost) return;
+    if (Date.now() - this.lastNewCheck < this.newMailCheckMs) return;
+    this.lastNewCheck = Date.now();
+    try {
+      const r = await this.incremental({ duringInitial: true });
+      if (r?.newInbox?.length) this.log(`new mail during backfill: ${r.newInbox.length}`);
+    } catch (e) {
+      this.log(`new-mail check during backfill: ${e.message}`);
+    }
+    this.lastNewCheck = Date.now();   // measure the gap from the END of the check
   }
 
   async fetchAndStore(ids, format = 'metadata') {
@@ -115,10 +144,10 @@ class AccountSync {
     return rows;
   }
 
-  async incremental() {
+  async incremental({ duringInitial = false } = {}) {
     const acct = this.account;
     if (!acct.history_id) return this.initial();
-    this.onProgress({ phase: 'incremental' });
+    if (!duringInitial) this.onProgress({ phase: 'incremental' });
     let pageToken;
     let latest = acct.history_id;
     const added = new Set(), deleted = new Set();
@@ -139,6 +168,9 @@ class AccountSync {
       }
     } catch (e) {
       if (e instanceof GmailError && e.status === 404) {
+        // Mid-backfill this must NOT restart the backfill — stop checking and let the pass that
+        // follows the backfill decide what to do.
+        if (duringInitial) { this.historyLost = true; this.log('history cursor expired during backfill — new-mail checks paused'); return { added: 0, deleted: 0, labelOps: 0, newInbox: [] }; }
         // History expired (mailbox idle > ~a week or too many changes) → full resync, keeping bodies where possible.
         this.log(`history expired for account ${this.accountId} — full resync`);
         this.db.updateAccount(this.accountId, { history_id: null, initial_done: 0, next_page_token: null, synced_count: 0 });
@@ -157,7 +189,12 @@ class AccountSync {
     for (const op of labelOps) if (!deleted.has(op.id) && !this.db.existingIds(this.accountId, [op.id]).size && !added.has(op.id)) toFetch.push(op.id);
     for (let i = 0; i < toFetch.length; i += BATCH) await this.fetchAndStore(toFetch.slice(i, i + BATCH));
     this.db.updateAccount(this.accountId, { history_id: latest });
-    return { added: toFetch.length, deleted: deleted.size, labelOps: labelOps.length };
+    const newInbox = toFetch.filter(id => this.db.getMessage(this.accountId, id)?.labels?.includes('INBOX'));
+    if (newInbox.length) {
+      this.newFromIncremental.push(...newInbox);
+      if (duringInitial) { try { this.onNewMail(newInbox); } catch (e) { this.log('new-mail callback: ' + e.message); } }
+    }
+    return { added: toFetch.length, deleted: deleted.size, labelOps: labelOps.length, newInbox };
   }
 }
 

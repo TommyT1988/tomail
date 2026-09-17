@@ -17,13 +17,17 @@ class GmailProvider {
     return this.syncer;
   }
   /** Runs whatever sync is due; resolves with ids of NEW inbox messages (for notifications). */
-  async sync(onProgress) {
+  async sync(onProgress, { onNewMail } = {}) {
     const s = this._syncer(onProgress);
+    s.onNewMail = onNewMail || (() => {});
     const before = new Set(this.db.labelIds(this.accountId, 'INBOX'));
     await s.run();
     const after = this.db.labelIds(this.accountId, 'INBOX').filter(id => !before.has(id));
     this.reconcileSnoozes();
-    return { newInbox: after, newIds: after };
+    // A backfill locally "adds" the whole mailbox to the inbox; only what the history deltas turned up
+    // is actually new, so notifications and rules see that rather than 200k old messages.
+    const fresh = s.didInitial ? [...new Set(s.newFromIncremental)].filter(id => !before.has(id)) : after;
+    return { newInbox: fresh, newIds: fresh };
   }
   async modify(ids, { add = [], remove = [] }) {
     for (let i = 0; i < ids.length; i += 1000) {

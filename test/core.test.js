@@ -129,7 +129,7 @@ test('sync: initial (paged) → incremental applies adds/deletes/label ops, 404 
   g.store.get('m1').labelIds = ['INBOX']; g.bump('labelsRemoved', 'm1', ['UNREAD']);
   g.bump('labelsAdded', 'm1', ['STARRED']); g.store.get('m1').labelIds.push('STARRED');
   const r = await s.incremental();
-  assert.deepEqual(r, { added: 1, deleted: 1, labelOps: 2 });
+  assert.deepEqual(r, { added: 1, deleted: 1, labelOps: 2, newInbox: ['m4'] });
   assert.equal(db.getMessage(a.id, 'm2'), null);
   assert.equal(db.getMessage(a.id, 'm4').unread, true);
   const m1 = db.getMessage(a.id, 'm1'); assert.equal(m1.unread, false); assert.equal(m1.starred, true);
@@ -329,4 +329,48 @@ test('aliases: identities, validation, and sending as one', async () => {
 
   // and an alias counts as "us" when deciding whether a thread got a reply
   assert.ok(actions.ownEmails().includes('sales@example.com'));
+});
+
+test('sync: new mail arrives DURING a long backfill, not after it', async () => {
+  const { GmailError } = require('../electron/gmail/api');
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  // a mailbox big enough to take several batches (BATCH = 40)
+  const backlog = Array.from({ length: 60 }, (_, i) => msg('old' + i, ['INBOX']));   // the fake pages 2 at a time, so this is many passes
+  const g = fakeGmail(backlog);
+  const origGet = g.get.bind(g); g.get = async (p, q) => { try { return await origGet(p, q); } catch (e) { if (e.status === 404) throw new GmailError(404, 'not found'); throw e; } };
+
+  const notified = [];
+  let injected = false, storedWhenNotified = null;
+  const s = new AccountSync({
+    db, client: g, account: { id: a.id }, newMailCheckMs: 0,   // check on every batch
+    onProgress: (p) => {
+      // the buyer sends something once the backfill is under way but nowhere near done
+      if (p.phase === 'initial' && p.synced >= 10 && !injected) {
+        injected = true;
+        g.store.set('fresh1', msg('fresh1', ['INBOX', 'UNREAD']));
+        g.bump('messagesAdded', 'fresh1');
+      }
+    },
+  });
+  s.onNewMail = (ids) => { notified.push(...ids); storedWhenNotified = db.countMessages({ kind: 'all', accountId: a.id }); };
+
+  await s.run();
+
+  assert.deepEqual(notified, ['fresh1'], 'the new message was reported while the backfill was still running');
+  assert.ok(storedWhenNotified > 0 && storedWhenNotified < 61, `it landed mid-backfill (${storedWhenNotified} of 61 stored at the time)`);
+  assert.equal(db.getMessage(a.id, 'fresh1').unread, true);
+  assert.equal(db.countMessages({ kind: 'all', accountId: a.id }), 61, 'and the backfill still completed');
+  assert.equal(db.getAccount(a.id).initial_done, 1);
+
+  // the finished backfill must not be reported as 141 new messages
+  const p = new GmailProvider({ db: new MailDb(':memory:'), accountId: a.id, client: g });
+  const db2 = p.db; db2.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  let injected2 = false;
+  const r = await p.sync((st) => {
+    if (st.phase === 'initial' && st.synced >= 10 && !injected2) { injected2 = true; g.store.set('fresh2', msg('fresh2', ['INBOX', 'UNREAD'])); g.bump('messagesAdded', 'fresh2'); }
+  }, { onNewMail: () => {} });
+  p.syncer.newMailCheckMs = 0;
+  assert.ok(!r.newInbox.includes('old7'), 'backfilled mail is not "new"');
+  assert.ok(r.newInbox.length < 10, `only genuinely new mail is reported (${r.newInbox.length})`);
 });
