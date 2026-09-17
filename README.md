@@ -2,9 +2,11 @@
 <h1 align="center">Tomail</h1>
 <p align="center">A fast, keyboard-friendly desktop email client for Gmail, Google Workspace and any IMAP mailbox.<br>Windows · macOS · Linux · optional local AI</p>
 
-<p align="center"><img src="docs/screenshots/inbox-3.png" width="800" alt="Tomail inbox"></p>
+<p align="center"><img src="docs/screenshots/inbox-4.png" width="800" alt="Tomail inbox"></p>
 
-Tomail keeps a local copy of your mail, so folders, unread counts and search are instant even on a 60,000-message inbox, and it works when you're offline. Everything you do (read, flag, archive, move, snooze, rules) is applied to your provider too, so your phone and webmail stay in step.
+Tomail keeps a local copy of your mail, so folders, unread counts and search stay instant on a mailbox of any size, and it works when you're offline. Everything you do (read, flag, archive, move, snooze, rules) is applied to your provider too, so your phone and webmail stay in step.
+
+It is built and measured against a **200,000-message** mailbox, not a demo one — see [Big mailboxes](#big-mailboxes).
 
 ## Download
 
@@ -33,18 +35,18 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 ## What it does
 
 **Reading**
-- Three-pane layout: folders and labels on the left, message list with Primary / Promotions / Social tabs grouped by day, reading pane below with a draggable divider
+- Three-pane layout: folders and labels on the left, message list with Primary / Promotions / Social tabs grouped by day, reading pane below. Both dividers drag, and the folder list can be resized or hidden entirely
 - Conversation view (toggle in the list header) stacks a thread as cards
 - Open any message in its own window (`o`), or print it (`p`)
 - Remote images blocked by default with a per-message "Load images"; HTML rendered in a sandbox; links open in your browser
-- Attachment previews: inline image thumbnails, a viewer for images, PDFs and text
+- Attachment previews: inline image thumbnails, a viewer for images, PDFs and text. Messages appear as soon as their text arrives — images fill in behind rather than holding up the whole message
 - Calendar invitations show as a card with Accept / Maybe / Decline that replies to the organiser
 - **Sender card**: history with each sender, your typical reply time, first-contact and authentication (SPF/DKIM/DMARC) flags
 - **Phishing warnings**: look-alike domains, links whose text and destination differ, brand names on foreign addresses, urgent payment wording from strangers
-- **Quick reply** under every message (Ctrl+Enter to send), and inline reply from notifications on macOS
+- **Reply** and **Quick reply** sit at the top right of every message, beside Follow up. Quick reply sends without opening a window (Ctrl+Enter), and notifications on macOS can be replied to inline
 - **Tabs**: Ctrl+click a folder or middle-click a message to open it in a tab; searches open in their own tab
 
-<p align="center"><img src="docs/screenshots/conversation-3.png" width="800" alt="Conversation view"></p>
+<p align="center"><img src="docs/screenshots/conversation-4.png" width="800" alt="Conversation view"></p>
 
 **Triage**
 - Read / unread, flag, archive, delete, move, junk, all instant and synced, with **Undo**
@@ -57,7 +59,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 
 **Writing**
 - Compose opens in its own window: reply, reply all, forward (with original attachments), new
-- The quoted original has a grip: drag it up to read more of what you're replying to
+- The quoted original has a grip: drag it up to read more of what you're replying to, or **Edit it** to fold it into your message and trim it
 - Send, Attach and Save draft live at the top of the window; recipients are chips (click to select, Delete to remove, double-click to edit)
 - Rich text: bold, italic, underline, lists, quotes, links, pasted or inserted images, an emoji picker
 - **Send from an alias**: add the other addresses your account can send as (Settings → Accounts → Aliases) and pick one in the From menu; replies default to the address the message was sent to
@@ -68,8 +70,8 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Outbox: no connection? The message waits and goes out when you're back online
 - Per-account signatures
 
-<p align="center"><img src="docs/screenshots/compose-3.png" width="700" alt="Compose window"></p>
-<p align="center"><img src="docs/screenshots/window-3.png" width="700" alt="A message in its own window"></p>
+<p align="center"><img src="docs/screenshots/compose-4.png" width="700" alt="Compose window"></p>
+<p align="center"><img src="docs/screenshots/window-4.png" width="700" alt="A message in its own window"></p>
 
 **✨ Local AI (optional)**
 - Install [Ollama](https://ollama.com/download), then Settings → AI: pick or download a model (2–5 GB) and switch it on. Everything runs on your own computer; nothing is sent anywhere.
@@ -84,13 +86,15 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Operators: `from:` `to:` `subject:` `in:folder` `is:unread` `is:flagged` `has:attachment` `after:2026-01-01` `before:2026-02-01`, plus a Filters menu
 - **Deep search** runs the query on the server (Gmail syntax, inside attachments for Gmail)
 
+<p align="center"><img src="docs/screenshots/settings-4.png" width="800" alt="Settings"></p>
+
 **Everything else**
 - Multiple accounts of either kind with a merged All Inboxes view
 - New-mail notifications (click to open) and an unread badge on the dock / taskbar icon
 - IMAP accounts get pushed to instantly (IMAP IDLE); Gmail polls every 20 s while Tomail is the active window, 60 s in the background
 - **Stays in the tray** so new mail still notifies you after you close the window, with start-at-login if you want it (Settings → General)
 - Remembers where you left the window, on the screen you left it on
-- Dark mode (system, light or dark)
+- Dark mode (system, light or dark), with the actions you use most colour-coded rather than a wall of grey
 - Automatic updates — click the version number at the bottom right to check now
 - Housekeeping: optionally keep downloaded bodies for 30 / 90 / 365 days; weekly database compaction
 - **App lock** with a passphrase (at startup and after idle) and **.mbox export** of any account
@@ -98,7 +102,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Achievements, if you like that sort of thing (switchable)
 - Something wrong? **Settings → Report a problem** opens a GitHub issue with the version and recent log attached (email addresses redacted)
 
-<p align="center"><img src="docs/screenshots/dark-3.png" width="800" alt="Dark mode"></p>
+<p align="center"><img src="docs/screenshots/dark-4.png" width="800" alt="Dark mode"></p>
 
 ### Keyboard
 
@@ -148,6 +152,23 @@ On a headless Linux box the demo can be exercised under Xvfb:
 
 Bump `version` in `package.json`, commit, tag `vX.Y.Z` and push the tag. The Release workflow builds every platform and attaches installers to a GitHub Release; installed copies update themselves. The repository secrets `TOMAIL_GOOGLE_CLIENT_ID` / `TOMAIL_GOOGLE_CLIENT_SECRET` supply the built-in Google client. The repo must stay public for auto-update to reach the release files.
 
+## Big mailboxes
+
+Most mail clients are pleasant at 5,000 messages and miserable at 200,000. Tomail is profiled at the top end, and every number here is measured on a mailbox of 200,000 messages with 336,000 folder assignments:
+
+| | |
+|---|---|
+| Open a folder | 1.1 ms |
+| Switch to conversation view | 4.4 ms |
+| Every folder and unread count in the sidebar | 0.7 ms |
+| Read the clicked message out of the local store | 0.1 ms |
+| Search | ~85 ms |
+| Cold start of the local database | 2 ms |
+
+How, briefly. Folder listing reads an index that already carries each message's date, so showing the newest hundred never sorts the other 39,900. Folder counts are kept as running totals by database triggers and checked against a real count once a day. Conversation view walks the index newest-first and stops once it has a screenful, instead of grouping the whole folder. Recent mail is fetched ahead of time in the background so opening it doesn't wait for the network. And the first sync of a large mailbox no longer blocks new mail from arriving while it runs.
+
+The first sync itself is paced by Gmail, not by Tomail: Google allows a fixed number of requests per minute and a 200,000-message mailbox is about an hour of downloading at the fastest rate they permit. Tomail slows itself down automatically if Google pushes back, and speeds up again when it stops.
+
 ## How it's built
 
 Electron 44 (Node 24) · React 19 + Vite · SQLite via `node:sqlite` with FTS5 · imapflow / mailparser / nodemailer. No UI libraries; icons are inline SVG. No native modules to compile.
@@ -175,8 +196,9 @@ test/                     node:test suite (db, mime, batch parsing, sync, action
 
 | Version | Highlights |
 |---|---|
+| 0.9.5 | Edit the quoted original when replying; a rate limiter that slows down when Gmail says to, instead of insisting |
 | 0.9.4 | Resizable folder list, draggable quoted mail, Reply at the top of a message, a version button that checks for updates, and some colour |
-| 0.9 | Tray icon with start-at-login, remembered window position, send-as aliases, oldest-first that opens on today, a settings dialog that stays put, new mail during a first sync, read-ahead so clicks are instant, and a large mailbox that stops stalling — folders, counts, conversations and clicks all measured on 200,000 messages |
+| 0.9 | Tray icon with start-at-login, remembered window position, send-as aliases, oldest-first that opens on today, a settings dialog that stays put, new mail during a first sync, read-ahead so clicks are instant, and a mailbox of 200,000 that stops stalling |
 | 0.8 | Local AI via Ollama: summaries, suggested replies, drafting in your tone, rewriting, rules from a sentence |
 | 0.7 | Send later, snippets, quick reply, tabs, phishing warnings, app lock, mbox export, clean links, achievements |
 | 0.6 | Follow-up reminders, sender card with SPF/DKIM/DMARC |
@@ -189,6 +211,8 @@ test/                     node:test suite (db, mime, batch parsing, sync, action
 ## Roadmap
 
 Code signing · Microsoft OAuth for Outlook / 365 · Google verification for public use.
+
+Smaller things on the list: one-click unsubscribe (the header is already read, just not used yet), a contacts manager rather than autocomplete alone, a Flatpak build, and an accessibility pass.
 
 ## License
 
