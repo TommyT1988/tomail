@@ -284,7 +284,6 @@ export default function App() {
   const viewAcct = accounts.find(a => a.id === view.accountId);
   const showCategories = view.kind === 'all-inboxes' ? accounts.some(a => a.kind !== 'imap') : (view.kind === 'label' && view.labelId === 'INBOX' && viewAcct?.kind !== 'imap');
   const hasSel = selected.length > 0;
-  const canReply = !!message && message.bodyFetched;
   const draftCounts = useMemo(() => { const o = { all: drafts.local.length + drafts.remote.length }; for (const d of [...drafts.local, ...drafts.remote]) o[d.accountId] = (o[d.accountId] || 0) + 1; return o; }, [drafts]);
   const selLabels = labels[selected[0]?.accountId || view.accountId] || [];
 
@@ -309,10 +308,6 @@ export default function App() {
           : <button className="new-btn" onClick={() => openCompose('new')} disabled={!accounts.length}><Icon name="plus" /> New</button>}
         <button onClick={() => { mail.sync.now(); toast('Checking for new mail…'); }} disabled={!accounts.length || info?.demo}><span className="ico"><Icon name="refresh" /></span>Refresh</button>
         <span className="spacer" />
-        <button className="act reply" disabled={!canReply} onClick={() => openCompose('reply')}><span className="ico"><Icon name="reply" /></span>Reply</button>
-        <button className="act reply" disabled={!canReply} onClick={() => openCompose('replyAll')}><span className="ico"><Icon name="replyAll" /></span>Reply All</button>
-        <button className="act fwd" disabled={!canReply} onClick={() => openCompose('forward')}><span className="ico"><Icon name="forward" /></span>Forward</button>
-        <span className="sep" />
         <MarkMenu disabled={!hasSel} onMark={doMark} inSpam={view.labelId === 'SPAM'} />
         <span className="sep" />
         {inTrash ? <button className="act arch" disabled={!hasSel} onClick={doRestore}><span className="ico"><Icon name="inbox" /></span>Restore</button>

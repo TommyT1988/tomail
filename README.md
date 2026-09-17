@@ -2,7 +2,7 @@
 <h1 align="center">Tomail</h1>
 <p align="center">A fast, keyboard-friendly desktop email client for Gmail, Google Workspace, Proton Mail and any IMAP mailbox.<br>Windows · macOS · Linux · optional local AI</p>
 
-<p align="center"><img src="docs/screenshots/inbox-4.png" width="800" alt="Tomail inbox"></p>
+<p align="center"><img src="docs/screenshots/inbox-5.png" width="800" alt="Tomail inbox"></p>
 
 Tomail keeps a local copy of your mail, so folders, unread counts and search stay instant on a mailbox of any size, and it works when you're offline. Everything you do (read, flag, archive, move, snooze, rules) is applied to your provider too, so your phone and webmail stay in step.
 
@@ -47,7 +47,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - **Reply** and **Quick reply** sit at the top right of every message, beside Follow up. Quick reply sends without opening a window (Ctrl+Enter), and notifications on macOS can be replied to inline
 - **Tabs**: Ctrl+click a folder or middle-click a message to open it in a tab; searches open in their own tab
 
-<p align="center"><img src="docs/screenshots/conversation-4.png" width="800" alt="Conversation view"></p>
+<p align="center"><img src="docs/screenshots/conversation-5.png" width="800" alt="Conversation view"></p>
 
 **Triage**
 - Read / unread, flag, archive, delete, move, junk, all instant and synced, with **Undo**
@@ -72,7 +72,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Per-account signatures
 
 <p align="center"><img src="docs/screenshots/compose-4.png" width="700" alt="Compose window"></p>
-<p align="center"><img src="docs/screenshots/window-4.png" width="700" alt="A message in its own window"></p>
+<p align="center"><img src="docs/screenshots/window-5.png" width="700" alt="A message in its own window"></p>
 
 **✨ Local AI (optional)**
 - Install [Ollama](https://ollama.com/download), then Settings → AI: pick or download a model (2–5 GB) and switch it on. Everything runs on your own computer; nothing is sent anywhere.
@@ -103,7 +103,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - Achievements, if you like that sort of thing (switchable)
 - Something wrong? **Settings → Report a problem** opens a GitHub issue with the version and recent log attached (email addresses redacted)
 
-<p align="center"><img src="docs/screenshots/dark-4.png" width="800" alt="Dark mode"></p>
+<p align="center"><img src="docs/screenshots/dark-5.png" width="800" alt="Dark mode"></p>
 
 ### Keyboard
 

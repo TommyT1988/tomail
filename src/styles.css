@@ -103,14 +103,14 @@ a { color: var(--accent); }
 
 /* ── reading pane ── */
 .read { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.read .hdr { padding: 10px 16px; border-bottom: 1px solid var(--border); background: #fbfbfb; }
-.read .hdr h2 { font-size: 16px; margin: 0 0 6px; font-weight: 600; }
+.read .hdr { padding: 7px 16px 6px; border-bottom: 1px solid var(--border); background: #fbfbfb; }
+.read .hdr h2 { font-size: 15px; margin: 0; font-weight: 600; flex: 1; min-width: 0; line-height: 1.3; }
 .read .hdr .line { display: flex; gap: 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 .read .hdr .line b { color: var(--text); font-weight: 600; }
 .read .hdr .when { margin-left: auto; white-space: nowrap; }
-.read .hdr .labs { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
-.read .hdr .labs span { font-size: 10px; background: #e9eef6; color: #3a5a8c; border-radius: 3px; padding: 1px 6px; }
-.read .atts { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.read .hdr .lab { font-size: 10px; background: #e9eef6; color: #3a5a8c; border-radius: 3px; padding: 1px 6px; }
+.read .hdr .lnk { border: 0; background: none; color: var(--accent); padding: 0; font-size: 12px; cursor: pointer; }
+.read .atts { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 16px; border-bottom: 1px solid var(--border); }
 .read .att { border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; background: #fff; display: flex; gap: 6px; align-items: center; }
 .read .att .sz { color: var(--muted); font-size: 11px; }
 .read .att button { padding: 1px 5px; font-size: 11px; }
@@ -203,8 +203,6 @@ a { color: var(--accent); }
 
 /* ── a bit of colour: the actions people reach for most, and the folders they live in ── */
 .toolbar button.act .ico { color: inherit; }
-.toolbar button.act.reply .ico { color: #1f7a33; }
-.toolbar button.act.fwd .ico { color: #2f6fcb; }
 .toolbar button.act.arch .ico { color: #8a7a55; }
 .toolbar button.act.del .ico { color: var(--danger); }
 .toolbar button.act:disabled .ico { color: #c2c2c2; }
@@ -225,7 +223,7 @@ button.go:hover:not(:disabled) { background: #19662a; }
 :root.dark .topbar, :root.dark .toolbar, :root.dark .status, :root.dark .read .hdr, :root.dark .split .divider,
 :root.dark .menu, :root.dark .modal, :root.dark input, :root.dark select, :root.dark textarea, :root.dark .read .att, :root.dark .settings .acct, :root.dark .settings .snav, :root.dark .onboard .steps, :root.dark .rich .tb { background: var(--panel); color: var(--text); }
 :root.dark button:hover:not(:disabled) { background: #3a3b40; } :root.dark .tree .item:hover { background: #2d3036; }
-:root.dark .row .lab, :root.dark code { background: #3a3b40; color: #ccc; } :root.dark .read .hdr .labs span { background: #2e3b52; color: #bcd0f0; }
+:root.dark .row .lab, :root.dark code { background: #3a3b40; color: #ccc; } :root.dark .read .hdr .lab { background: #2e3b52; color: #bcd0f0; }
 :root.dark .read .imgbar { background: #3d3520; border-color: #6b5b26; color: #e6e6e6; } :root.dark .tabs .tab.active { color: var(--accent); }
 :root.dark .toolbar button .ico { color: #bbb; } :root.dark .toolbar button:disabled .ico { color: #555; } :root.dark button:disabled { color: #666; }
 :root.dark .row.sel, :root.dark .tree .item.active { color: #fff; }
@@ -280,8 +278,9 @@ button.go:hover:not(:disabled) { background: #19662a; }
 .compose .field .acct-sig { font-size: 11px; color: var(--muted); }
 .draftstate { font-size: 11px; color: var(--muted); margin-left: 8px; }
 .row.draft .from { color: var(--danger); }
-.read .hdr .hbtns { margin-left: auto; display: flex; gap: 4px; } .read .hdr .hbtns button { font-size: 12px; padding: 2px 6px; }
-.read .hdr .line.first { align-items: center; }
+.read .hdr .hbtns { margin-left: auto; display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; } .read .hdr .hbtns button { font-size: 12px; padding: 2px 6px; }
+.read .hdr .line.top { align-items: center; flex-wrap: nowrap; gap: 10px; }
+.read .hdr .line.meta { margin-top: 3px; align-items: center; }
 .empty-trash { margin-left: 8px; }
 
 /* ── rules editor ── */
@@ -353,7 +352,7 @@ button.go:hover:not(:disabled) { background: #19662a; }
 .sender { border-bottom: 1px solid var(--border); background: #fbfbfb; font-size: 12px; } :root.dark .sender { background: var(--panel); }
 .sender.first { background: #fff8e1; } :root.dark .sender.first { background: #3d3520; }
 .sender.failed { background: #fde8e6; } :root.dark .sender.failed { background: #4a2622; }
-.sender .sh { display: flex; gap: 8px; align-items: center; padding: 5px 16px; cursor: pointer; }
+.sender .sh { display: flex; gap: 8px; align-items: center; padding: 3px 16px; cursor: pointer; }
 .sender .sh .tw { font-size: 9px; color: var(--muted); } .sender .sh .who { font-weight: 600; } .sender .sh .spacer { flex: 1; }
 .sender .flag { border-radius: 10px; padding: 0 8px; background: #f0c674; color: #4a3a00; font-weight: 600; font-size: 11px; }
 .sender .flag.bad { background: #e57368; color: #fff; } .sender .flag.ok { background: #cfe8d3; color: #1f5f2a; }

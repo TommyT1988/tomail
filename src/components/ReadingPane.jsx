@@ -97,7 +97,7 @@ function AuthBadges({ auth }) {
 /** Who is this sender, in numbers: history with them, how you deal with their mail, first-contact warning. */
 function SenderCard({ message, onOpenMessage, onRuleFromSender, onInfo }) {
   const [info, setInfo] = useState(null);
-  const [open, setOpen] = useState(() => localStorage.getItem('senderCard') !== '0');
+  const [open, setOpen] = useState(() => localStorage.getItem('senderCard') === '1');
   useEffect(() => { let on = true; setInfo(null); onInfo?.(null); if (message.fromEmail) window.mail.messages.senderInfo(message.fromEmail).then(i => { if (on) { setInfo(i); onInfo?.(i); } }).catch(() => {}); return () => { on = false; }; }, [message.fromEmail, message.id]); // eslint-disable-line
   if (!message.fromEmail || !info || info.isOwn) return null;
   const first = info.received <= 1 && info.sentTo === 0;
@@ -198,19 +198,24 @@ function FollowUpMenu({ message, toast }) {
     </Dropdown>
   );
 }
-function Header({ message, onPrint, extra, onPopOut, toast, onReply, onQuickReply }) {
+function Header({ message, onPrint, extra, onPopOut, toast, onReplyTo, onQuickReply }) {
   const from = { name: message.fromName, email: message.fromEmail };
   const canReply = !message.labels?.includes('DRAFT');
+  const labs = (message.labels || []).filter(l => !['UNREAD', 'CATEGORY_PERSONAL'].includes(l) && !/^Label_\d+$/.test(l) && !/^\$Tomail/.test(l));
   return (
     <div className="hdr">
-      <h2>{message.subject || '(no subject)'}</h2>
-      <div className="line first"><span><b>{fmtAddrFull(from)}</b></span><span className="when">{fmtFull(message.date)}</span>
+      <div className="line top"><h2>{message.subject || '(no subject)'}</h2>
         <span className="hbtns">
-          {canReply && onReply && <button className="go" title="Reply in its own window (r)" onClick={() => onReply(message)}><Icon name="reply" size={12} /> Reply</button>}
+          {canReply && onReplyTo && <button className="go" title="Reply in its own window (r)" onClick={() => onReplyTo(message, 'reply')}><Icon name="reply" size={12} /> Reply</button>}
+          {canReply && onReplyTo && <button title="Reply to everyone (a)" onClick={() => onReplyTo(message, 'replyAll')}><Icon name="replyAll" size={12} /> All</button>}
+          {canReply && onReplyTo && <button title="Forward (f)" onClick={() => onReplyTo(message, 'forward')}><Icon name="forward" size={12} /> Forward</button>}
           {canReply && onQuickReply && <button title="Reply here without opening a window (Ctrl+Enter sends)" onClick={onQuickReply}><Icon name="send" size={12} /> Quick reply</button>}
-          <FollowUpMenu message={message} toast={toast} />{onPopOut && <button title="Open in a new window (o)" onClick={() => onPopOut(message)}><Icon name="external" size={12} /> Window</button>}<button title="Print" onClick={() => onPrint(message)}>Print</button>{extra}</span></div>
-      <div className="line"><span>to {addrList(message.to) || '—'}</span>{message.cc?.length > 0 && <span>· cc {addrList(message.cc)}</span>}</div>
-      {message.labels?.length > 0 && <div className="labs">{message.labels.filter(l => !['UNREAD', 'CATEGORY_PERSONAL'].includes(l) && !/^Label_\d+$/.test(l) && !/^\$Tomail/.test(l)).map(l => <span key={l}>{l.replace(/^CATEGORY_/, '').toLowerCase()}</span>)}</div>}
+          <FollowUpMenu message={message} toast={toast} />
+          {onPopOut && <button title="Open in a new window (o)" onClick={() => onPopOut(message)}><Icon name="external" size={12} /></button>}
+          <button title="Print (p)" onClick={() => onPrint(message)}>Print</button>{extra}</span></div>
+      <div className="line meta"><span><b>{fmtAddrFull(from)}</b></span><span>to {addrList(message.to) || '—'}</span>{message.cc?.length > 0 && <span>cc {addrList(message.cc)}</span>}
+        {labs.map(l => <span key={l} className="lab">{l.replace(/^CATEGORY_/, '').toLowerCase()}</span>)}
+        <span className="when">{fmtFull(message.date)}</span></div>
     </div>
   );
 }
@@ -265,13 +270,20 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
 
   if (thread && thread.length > 1) {
     const latest = thread[thread.length - 1];
+    const allOpen = thread.every(m => openIds.has(m.id));
     return (
       <div className="read">
-        <div className="hdr"><h2>{latest.subject || message.subject || '(no subject)'}</h2><div className="line"><span className="muted">{thread.length} messages in this conversation</span>
-          <span className="hbtns">
-            {!latest.labels?.includes('SENT') && <button className="go" title="Reply in its own window (r)" onClick={() => onReplyTo(latest, 'reply')}><Icon name="reply" size={12} /> Reply</button>}
-            {!latest.labels?.includes('SENT') && <button title="Reply here without opening a window" onClick={() => setQrOpen(true)}><Icon name="send" size={12} /> Quick reply</button>}
-            <FollowUpMenu message={latest} toast={toast} />{onPopOut && <button onClick={() => onPopOut(latest)}><Icon name="external" size={12} /> Window</button>}<button onClick={() => setOpenIds(new Set(thread.map(m => m.id)))}>Expand all</button><button onClick={() => setOpenIds(new Set([latest.id]))}>Collapse</button></span></div></div>
+        <div className="hdr">
+          <div className="line top"><h2>{latest.subject || message.subject || '(no subject)'}</h2>
+            <span className="hbtns">
+              {!latest.labels?.includes('SENT') && <button className="go" title="Reply to the latest message in its own window (r)" onClick={() => onReplyTo(latest, 'reply')}><Icon name="reply" size={12} /> Reply</button>}
+              {!latest.labels?.includes('SENT') && <button title="Reply to everyone (a)" onClick={() => onReplyTo(latest, 'replyAll')}><Icon name="replyAll" size={12} /> All</button>}
+              <button title="Forward the latest message (f)" onClick={() => onReplyTo(latest, 'forward')}><Icon name="forward" size={12} /> Forward</button>
+              {!latest.labels?.includes('SENT') && <button title="Reply here without opening a window (Ctrl+Enter sends)" onClick={() => setQrOpen(true)}><Icon name="send" size={12} /> Quick reply</button>}
+              <FollowUpMenu message={latest} toast={toast} />{onPopOut && <button title="Open in a new window (o)" onClick={() => onPopOut(latest)}><Icon name="external" size={12} /></button>}</span></div>
+          <div className="line meta"><span className="muted">{thread.length} messages in this conversation</span>
+            <button className="lnk" onClick={() => setOpenIds(allOpen ? new Set([latest.id]) : new Set(thread.map(m => m.id)))}>{allOpen ? 'Collapse' : 'Expand all'}</button>
+            <span className="when">{fmtFull(latest.date)}</span></div></div>
         <SenderCard message={latest} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} onInfo={setSenderInfo} />
         {latest.bodyFetched && <PhishingBanner message={latest} senderInfo={senderInfo} />}
         {latest.bodyFetched && <AiPanel message={latest} thread={thread} onSuggest={(t) => setSeed({ text: t, at: Date.now() })} />}
@@ -286,7 +298,7 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
   return (
     <div className="read">
       <Header message={message} onPrint={onPrint} onPopOut={onPopOut} toast={toast}
-        onReply={(m) => onReplyTo(m, 'reply')} onQuickReply={message.labels?.includes('SENT') ? null : () => setQrOpen(true)} />
+        onReplyTo={onReplyTo} onQuickReply={message.labels?.includes('SENT') ? null : () => setQrOpen(true)} />
       <SenderCard message={message} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} onInfo={setSenderInfo} />
       {message.bodyFetched && <PhishingBanner message={message} senderInfo={senderInfo} />}
       {message.bodyFetched && <AiPanel message={message} onSuggest={(t) => setSeed({ text: t, at: Date.now() })} />}

@@ -25,19 +25,12 @@ export default function MessageWindow({ accountId, id }) {
   useEffect(() => { load(); return window.mail.on('mail:changed', () => window.mail.messages.get(accountId, id).then(m => m && setMessage(m)).catch(() => {})); }, [accountId, id]); // eslint-disable-line
   const t = [{ accountId, id }];
   const act = (fn, msg) => fn().then(() => { toast(msg); if (/Archived|Deleted/.test(msg)) window.close(); }).catch(e => toast(e.message, true));
-  const reply = (mode) => window.mail.compose.open({ mode, accountId, originalId: id });
   return (
     <div className="app" style={{ gridTemplateRows: '38px 1fr' }}>
       <div className="toolbar">
-        <button onClick={() => reply('reply')}><span className="ico"><Icon name="reply" /></span>Reply</button>
-        <button onClick={() => reply('replyAll')}><span className="ico"><Icon name="replyAll" /></span>Reply All</button>
-        <button onClick={() => reply('forward')}><span className="ico"><Icon name="forward" /></span>Forward</button>
-        <span className="sep" />
         <button onClick={() => act(() => window.mail.actions.archive(t), 'Archived')}><span className="ico"><Icon name="archive" /></span>Archive</button>
         <button onClick={() => act(() => window.mail.actions.trash(t), 'Deleted')}><span className="ico"><Icon name="trash" /></span>Delete</button>
         <button onClick={() => act(() => window.mail.actions.star(t, !message?.starred), message?.starred ? 'Unflagged' : 'Flagged')}><span className="ico"><Icon name="flag" /></span>{message?.starred ? 'Unflag' : 'Flag'}</button>
-        <span className="spacer" />
-        <button onClick={() => window.mail.messages.print(accountId, id)}><span className="ico"><Icon name="external" /></span>Print</button>
       </div>
       <div className="main" style={{ minHeight: 0 }}>
         {error ? <div className="empty">{error}</div> : <ReadingPane message={message} thread={thread} loading={!message} prefs={prefs} error={null}
