@@ -113,6 +113,49 @@ CREATE TABLE IF NOT EXISTS message_labels (
   PRIMARY KEY (account_id, message_id, label_id)
 );
 CREATE INDEX IF NOT EXISTS message_labels_label ON message_labels(account_id, label_id);
+-- Folder counts, kept up to date by the triggers below rather than recounted on every refresh.
+-- Snoozed mail is hidden from its folders, so it is excluded here exactly as the sidebar excludes it.
+CREATE TABLE IF NOT EXISTS label_counts (
+  account_id INTEGER NOT NULL,
+  label_id TEXT NOT NULL,
+  total INTEGER NOT NULL DEFAULT 0,
+  unread INTEGER NOT NULL DEFAULT 0,
+  starred INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (account_id, label_id)
+);
+CREATE TRIGGER IF NOT EXISTS label_counts_ins AFTER INSERT ON message_labels BEGIN
+  INSERT INTO label_counts (account_id, label_id, total, unread, starred)
+    SELECT new.account_id, new.label_id,
+      CASE WHEN m.snooze_until IS NULL THEN 1 ELSE 0 END,
+      CASE WHEN m.snooze_until IS NULL AND m.unread = 1 THEN 1 ELSE 0 END,
+      CASE WHEN m.starred = 1 THEN 1 ELSE 0 END
+    FROM messages m WHERE m.account_id = new.account_id AND m.id = new.message_id
+  ON CONFLICT(account_id, label_id) DO UPDATE SET total = total + excluded.total, unread = unread + excluded.unread, starred = starred + excluded.starred;
+END;
+CREATE TRIGGER IF NOT EXISTS label_counts_del AFTER DELETE ON message_labels BEGIN
+  UPDATE label_counts SET
+    total = total - coalesce((SELECT CASE WHEN m.snooze_until IS NULL THEN 1 ELSE 0 END FROM messages m WHERE m.account_id = old.account_id AND m.id = old.message_id), 0),
+    unread = unread - coalesce((SELECT CASE WHEN m.snooze_until IS NULL AND m.unread = 1 THEN 1 ELSE 0 END FROM messages m WHERE m.account_id = old.account_id AND m.id = old.message_id), 0),
+    starred = starred - coalesce((SELECT CASE WHEN m.starred = 1 THEN 1 ELSE 0 END FROM messages m WHERE m.account_id = old.account_id AND m.id = old.message_id), 0)
+  WHERE account_id = old.account_id AND label_id = old.label_id;
+END;
+CREATE TRIGGER IF NOT EXISTS label_counts_read AFTER UPDATE OF unread ON messages
+WHEN old.unread <> new.unread AND new.snooze_until IS NULL BEGIN
+  UPDATE label_counts SET unread = unread + (CASE WHEN new.unread = 1 THEN 1 ELSE -1 END)
+  WHERE account_id = new.account_id AND label_id IN (SELECT label_id FROM message_labels WHERE account_id = new.account_id AND message_id = new.id);
+END;
+CREATE TRIGGER IF NOT EXISTS label_counts_flag AFTER UPDATE OF starred ON messages
+WHEN old.starred <> new.starred BEGIN
+  UPDATE label_counts SET starred = starred + (CASE WHEN new.starred = 1 THEN 1 ELSE -1 END)
+  WHERE account_id = new.account_id AND label_id IN (SELECT label_id FROM message_labels WHERE account_id = new.account_id AND message_id = new.id);
+END;
+CREATE TRIGGER IF NOT EXISTS label_counts_snooze AFTER UPDATE OF snooze_until ON messages
+WHEN (old.snooze_until IS NULL) <> (new.snooze_until IS NULL) BEGIN
+  UPDATE label_counts SET
+    total = total + (CASE WHEN new.snooze_until IS NULL THEN 1 ELSE -1 END),
+    unread = unread + (CASE WHEN new.snooze_until IS NULL THEN 1 ELSE -1 END) * (CASE WHEN new.unread = 1 THEN 1 ELSE 0 END)
+  WHERE account_id = new.account_id AND label_id IN (SELECT label_id FROM message_labels WHERE account_id = new.account_id AND message_id = new.id);
+END;
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
   subject, from_text, to_text, snippet, body,
   content='messages', content_rowid='rid', tokenize='unicode61'
@@ -217,6 +260,12 @@ class MailDb {
         WHERE m.account_id = message_labels.account_id AND m.id = message_labels.message_id) WHERE d IS NULL`);
       this.db.exec('ANALYZE');
       this.labelDateBackfillMs = Date.now() - t0;
+    }
+    if (!this.db.prepare('SELECT 1 AS x FROM label_counts LIMIT 1').get() && this.db.prepare('SELECT 1 AS x FROM message_labels LIMIT 1').get()) {
+      const t0 = Date.now();
+      this._stmts = new Map();          // recountLabels uses prep()
+      this.recountLabels();
+      this.labelCountFillMs = Date.now() - t0;
     }
     add('labels', 'imap_path', 'TEXT');
     add('messages', 'answered', 'INTEGER NOT NULL DEFAULT 0'); add('messages', 'calendar_json', 'TEXT');
@@ -630,20 +679,84 @@ class MailDb {
     return { where: w.join(' AND ') || '1', params, join };
   }
   /** One row per conversation (latest message), with count + unread for the members that match the view. */
+  /**
+   * Conversations, newest first. Grouping in SQL means aggregating every message in the folder before
+   * you can know which threads are newest — ~150ms on a big mailbox. When the view is in date order we
+   * instead walk the index newest-first and stop once we have enough distinct threads, which is what
+   * the flat list already does. Anything else (sorting by sender, size, subject) uses the SQL version.
+   */
   listThreads(view, { offset = 0, limit = 100 } = {}) {
+    const col = view.sort?.col || 'date';
+    const dir = view.sort?.dir || 'desc';
+    if (col === 'date' && dir === 'desc') {
+      const fast = this._listThreadsByWalking(view, { offset, limit });
+      if (fast) return fast;
+    }
+    return this._listThreadsGrouped(view, { offset, limit });
+  }
+  /** Returns null if it would have to walk unreasonably far (a folder that is nearly all one thread). */
+  _listThreadsByWalking(view, { offset, limit }) {
+    const need = offset + limit;
+    const CAP = Math.max(2000, need * 8);      // give up rather than scan a whole folder
+    const firsts = new Map();                  // thread key → the newest message id we've seen in it
     const { where, params, join } = this._viewSql(view);
-    const sql = `WITH t AS (SELECT m.account_id, m.thread_id, max(m.internal_date) AS d, count(*) AS n, sum(m.unread) AS u
-        FROM messages m ${join} WHERE ${where} AND m.thread_id IS NOT NULL GROUP BY m.account_id, m.thread_id)
+    // walk ids only: pulling whole rows just to throw most of them away is the expensive part
+    const step = Math.min(500, Math.max(200, need));
+    const walk = this.prep(`SELECT m.account_id, m.id, m.thread_id FROM messages m ${join} WHERE ${where}
+      ORDER BY ${orderSql(view, 'm')} LIMIT ? OFFSET ?`);
+    let scanned = 0;
+    while (firsts.size < need + 1 && scanned < CAP) {
+      const rows = walk.all(...params, step, scanned);
+      if (!rows.length) break;
+      scanned += rows.length;
+      for (const r of rows) {
+        const key = r.thread_id == null ? 'm:' + r.account_id + ':' + r.id : r.account_id + ':' + r.thread_id;
+        if (!firsts.has(key)) firsts.set(key, r);
+      }
+      if (rows.length < step) break;           // ran out of messages
+    }
+    if (firsts.size < need + 1 && scanned >= CAP) return null;
+    const chosen = [...firsts.values()].slice(offset, offset + limit);
+    if (!chosen.length) return [];
+    const marks2 = chosen.map(() => '(m.account_id = ? AND m.id = ?)').join(' OR ');
+    const full = this.prep(`SELECT m.rid, m.account_id, m.id, m.thread_id, m.internal_date, m.size, m.snippet, m.subject, m.from_name,
+        m.from_email, m.to_json, m.has_attachment, m.unread, m.starred, m.labels_json, m.snooze_until, m.answered, m.imap_folder, m.imap_uid
+      FROM messages m WHERE ${marks2}`).all(...chosen.flatMap(r => [r.account_id, r.id])).map(rowToListItem);
+    const order = new Map(chosen.map((r, i) => [r.account_id + ':' + r.id, i]));
+    const page = full.sort((x, y) => order.get(x.accountId + ':' + x.id) - order.get(y.accountId + ':' + y.id));
+    // how many messages each of those threads has IN THIS VIEW, and how many are unread
+    const withThread = page.filter(r => r.threadId != null);
+    if (withThread.length) {
+      const marks = withThread.map(() => '?').join(',');
+      const stats = this.prep(`SELECT m.account_id, m.thread_id, count(*) AS n, sum(m.unread) AS u
+        FROM messages m ${join} WHERE ${where} AND m.thread_id IN (${marks}) GROUP BY m.account_id, m.thread_id`)
+        .all(...params, ...withThread.map(r => r.threadId));
+      const by = new Map(stats.map(r => [r.account_id + ':' + r.thread_id, r]));
+      for (const r of page) {
+        const st = by.get(r.accountId + ':' + r.threadId);
+        if (st) { r.threadCount = st.n; r.threadUnread = st.u; }
+      }
+    }
+    return page;
+  }
+  _listThreadsGrouped(view, { offset = 0, limit = 100 } = {}) {
+    const { where, params, join } = this._viewSql(view);
+    // A message with no thread id is its own conversation. Grouping on thread_id alone dropped those
+    // rows entirely, so turning conversations on could make mail disappear.
+    const tk = `coalesce(m.thread_id, 'msg:' || m.id)`;
+    const sql = `WITH t AS (SELECT m.account_id, ${tk} AS tk, max(m.internal_date) AS d, count(*) AS n, sum(m.unread) AS u
+        FROM messages m ${join} WHERE ${where} GROUP BY m.account_id, tk)
       SELECT m.rid, m.account_id, m.id, m.thread_id, m.internal_date, m.size, m.snippet, m.subject, m.from_name, m.from_email, m.to_json,
         m.has_attachment, m.unread, m.starred, m.labels_json, m.snooze_until, m.answered, m.imap_folder, m.imap_uid,
         t.n AS thread_count, t.u AS thread_unread
-      FROM t JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.thread_id AND m.internal_date = t.d
-      GROUP BY m.account_id, m.thread_id ORDER BY ${orderSql(view, 'm', 't.d')} LIMIT ? OFFSET ?`;
+      FROM t JOIN messages m ON m.account_id = t.account_id AND ${tk} = t.tk AND m.internal_date = t.d
+      GROUP BY m.account_id, t.tk ORDER BY ${orderSql(view, 'm', 't.d')} LIMIT ? OFFSET ?`;
     return this.prep(sql).all(...params, limit, offset).map(rowToListItem);
   }
   countThreads(view) {
     const { where, params, join } = this._viewSql(view);
-    return this.prep(`SELECT count(*) AS n FROM (SELECT 1 FROM messages m ${join} WHERE ${where} AND m.thread_id IS NOT NULL GROUP BY m.account_id, m.thread_id)`).get(...params).n;
+    return this.prep(`SELECT count(*) AS n FROM (SELECT 1 FROM messages m ${join} WHERE ${where}
+      GROUP BY m.account_id, coalesce(m.thread_id, 'msg:' || m.id))`).get(...params).n;
   }
   /** Members of a thread that are visible in the given view context (TRASH/SPAM hidden unless viewing them). */
   threadMessages(accountId, threadId, { includeTrash = false } = {}) {
@@ -731,30 +844,65 @@ class MailDb {
    */
   counts() {
     const labels = {};
-    for (const r of this.prep('SELECT account_id, label_id, count(*) AS total FROM message_labels GROUP BY account_id, label_id').all()) {
-      (labels[r.account_id] ||= {})[r.label_id] = { total: r.total, unread: 0 };
+    const gone = {};      // unread/flagged sitting in Trash or Junk, which the favourites exclude
+    for (const r of this.prep('SELECT account_id, label_id, total, unread, starred FROM label_counts').all()) {
+      if (r.label_id === 'TRASH' || r.label_id === 'SPAM') {
+        const g = (gone[r.account_id] ||= { unread: 0, starred: 0 });
+        g.unread += r.unread; g.starred += r.starred;
+      }
+      if (r.total > 0 || r.unread > 0) (labels[r.account_id] ||= {})[r.label_id] = { total: r.total, unread: r.unread };
     }
-    for (const r of this.prep(`SELECT ml.account_id, ml.label_id, count(*) AS unread
-      FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id
-      WHERE m.unread = 1 AND m.snooze_until IS NULL GROUP BY ml.account_id, ml.label_id`).all()) {
-      const e = labels[r.account_id]?.[r.label_id]; if (e) e.unread = r.unread;
-    }
-    // snoozed mail is hidden from its folders until it wakes, so it doesn't count towards them
-    for (const r of this.prep(`SELECT ml.account_id, ml.label_id, count(*) AS n
-      FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id
-      WHERE m.snooze_until IS NOT NULL GROUP BY ml.account_id, ml.label_id`).all()) {
-      const e = labels[r.account_id]?.[r.label_id]; if (e) e.total = Math.max(0, e.total - r.n);
-    }
-    const fav = this.prep(`SELECT
-      (SELECT count(*) FROM messages m WHERE m.unread = 1 AND m.snooze_until IS NULL AND NOT EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id=m.account_id AND x.message_id=m.id AND x.label_id IN ('TRASH','SPAM'))) AS unread,
-      (SELECT count(*) FROM messages m WHERE m.starred = 1 AND NOT EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id=m.account_id AND x.message_id=m.id AND x.label_id IN ('TRASH','SPAM'))) AS starred,
+    /* Checking "is it in Trash or Junk?" for every unread message cost ~55ms. Count them all off the
+       partial indexes (sub-millisecond) and subtract what the counters say is binned. A message can't
+       be in both Trash and Junk — every provider treats them as one folder or the other. */
+    const all = this.prep(`SELECT
+      (SELECT count(*) FROM messages m WHERE m.unread = 1 AND m.snooze_until IS NULL) AS unread,
+      (SELECT count(*) FROM messages m WHERE m.starred = 1) AS starred,
       (SELECT count(*) FROM messages m WHERE m.snooze_until IS NOT NULL) AS snoozed`).get();
+    let goneUnread = 0, goneStarred = 0;
+    for (const g of Object.values(gone)) { goneUnread += g.unread; goneStarred += g.starred; }
+    const fav = { unread: Math.max(0, all.unread - goneUnread), starred: Math.max(0, all.starred - goneStarred), snoozed: all.snoozed };
     let inboxTotal = 0, inboxUnread = 0;
     for (const acc of Object.values(labels)) {
       const i = acc.INBOX; if (!i) continue;
       inboxTotal += i.total; inboxUnread += i.unread;
     }
     return { labels, favourites: { ...fav, inboxTotal, inboxUnread } };
+  }
+  /** Rebuild the folder counters from the messages themselves. Fills them in, and repairs any drift. */
+  recountLabels() {
+    this.tx(() => {
+      this.db.exec('DELETE FROM label_counts');
+      this.db.exec(`INSERT INTO label_counts (account_id, label_id, total, unread, starred)
+        SELECT ml.account_id, ml.label_id,
+          sum(CASE WHEN m.snooze_until IS NULL THEN 1 ELSE 0 END),
+          sum(CASE WHEN m.snooze_until IS NULL AND m.unread = 1 THEN 1 ELSE 0 END),
+          sum(CASE WHEN m.starred = 1 THEN 1 ELSE 0 END)
+        FROM message_labels ml JOIN messages m ON m.account_id = ml.account_id AND m.id = ml.message_id
+        GROUP BY ml.account_id, ml.label_id`);
+    });
+    this.kvSet('labelCountsAt', Date.now());
+  }
+  /** True when the maintained counters disagree with a full recount (a bug, not an expected state). */
+  labelCountDrift() {
+    const before = this.prep('SELECT account_id, label_id, total, unread, starred FROM label_counts').all();
+    const after = this.prep(`SELECT ml.account_id, ml.label_id,
+        sum(CASE WHEN m.snooze_until IS NULL THEN 1 ELSE 0 END) AS total,
+        sum(CASE WHEN m.snooze_until IS NULL AND m.unread = 1 THEN 1 ELSE 0 END) AS unread,
+        sum(CASE WHEN m.starred = 1 THEN 1 ELSE 0 END) AS starred
+      FROM message_labels ml JOIN messages m ON m.account_id = ml.account_id AND m.id = ml.message_id
+      GROUP BY ml.account_id, ml.label_id`).all();
+    const key = (r) => `${r.account_id}:${r.label_id}`;
+    const want = new Map(after.map(r => [key(r), r]));
+    const out = [];
+    for (const r of before) {
+      const w = want.get(key(r));
+      if (!w) { if (r.total || r.unread || r.starred) out.push({ label: key(r), have: r, want: null }); continue; }
+      if (w.total !== r.total || w.unread !== r.unread || w.starred !== r.starred) out.push({ label: key(r), have: { total: r.total, unread: r.unread, starred: r.starred }, want: { total: w.total, unread: w.unread, starred: w.starred } });
+      want.delete(key(r));
+    }
+    for (const [k, w] of want) if (w.total || w.unread || w.starred) out.push({ label: k, have: null, want: { total: w.total, unread: w.unread, starred: w.starred } });
+    return out;
   }
   kvGet(k) { const r = this.prep('SELECT v FROM kv WHERE k = ?').get(k); return r ? JSON.parse(r.v) : null; }
   kvSet(k, v) { this.prep('INSERT OR REPLACE INTO kv (k, v) VALUES (?,?)').run(k, JSON.stringify(v)); }

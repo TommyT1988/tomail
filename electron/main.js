@@ -466,6 +466,10 @@ function housekeeping() {
     const last = db.kvGet('lastVacuum') || 0;
     if (Date.now() - last > 7 * 86400000) { db.vacuum(); log('housekeeping: database compacted'); }
     if (Date.now() - (db.kvGet('lastAnalyze') || 0) > 7 * 86400000) { db.analyze(); log('housekeeping: statistics refreshed'); }
+    // The folder counters are maintained by triggers. Check them against a real count once a day:
+    // a mismatch is a bug, and the sidebar shouldn't be wrong while we find out about it.
+    const drift = db.labelCountDrift();
+    if (drift.length) { log(`housekeeping: folder counts were off (${JSON.stringify(drift).slice(0, 300)}) — recounted`); db.recountLabels(); }
   } catch (e) { log('housekeeping:', e.message); }
 }
 function handle(channel, fn) {

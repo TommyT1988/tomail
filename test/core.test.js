@@ -519,3 +519,72 @@ test('read-ahead picks the right messages and stays quiet', async () => {
   await actions.getMessage(a.id, 'p2');              // a real click
   assert.equal(changes, 1, 'which does notify');
 });
+
+test('folder counters survive churn and match a real count', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const LAB = ['INBOX', 'SENT', 'TRASH', 'SPAM', 'UNREAD', 'STARRED', 'Work', 'Bills'];
+  const mk = (i, labels) => normaliseMessage(msg('c' + i, labels));
+  for (let i = 0; i < 400; i++) db.upsertMessages(a.id, [mk(i, [LAB[i % 8], 'INBOX'])]);
+  assert.deepEqual(db.labelCountDrift(), [], 'correct from the start');
+
+  // every kind of change that can move a count
+  let seed = 3; const rnd = (n) => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) % n;
+  for (let i = 0; i < 3000; i++) {
+    const id = 'c' + rnd(400);
+    switch (rnd(6)) {
+      case 0: db.upsertMessages(a.id, [mk(Number(id.slice(1)), [LAB[rnd(8)], LAB[rnd(8)]])]); break;
+      case 1: db.applyLabelChange(a.id, [id], { add: [LAB[rnd(8)]] }); break;
+      case 2: db.applyLabelChange(a.id, [id], { remove: [LAB[rnd(8)]] }); break;
+      case 3: db.applyLabelChange(a.id, [id], rnd(2) ? { add: ['UNREAD'] } : { remove: ['UNREAD'] }); break;
+      case 4: db.setSnooze(a.id, [id], rnd(2) ? Date.now() + 3600000 : null); break;
+      case 5: db.deleteMessages(a.id, [id]); break;
+    }
+  }
+  assert.deepEqual(db.labelCountDrift(), [], 'still correct after 3,000 random changes');
+
+  // and the sidebar figures derived from them
+  const c = db.counts();
+  const real = db.prep(`SELECT
+    (SELECT count(*) FROM messages m WHERE m.unread = 1 AND m.snooze_until IS NULL AND NOT EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id=m.account_id AND x.message_id=m.id AND x.label_id IN ('TRASH','SPAM'))) AS unread,
+    (SELECT count(*) FROM messages m WHERE m.starred = 1 AND NOT EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id=m.account_id AND x.message_id=m.id AND x.label_id IN ('TRASH','SPAM'))) AS starred,
+    (SELECT count(*) FROM messages m WHERE m.snooze_until IS NOT NULL) AS snoozed`).get();
+  assert.equal(c.favourites.unread, real.unread, 'unread matches the slow way of counting it');
+  assert.equal(c.favourites.starred, real.starred, 'flagged too');
+  assert.equal(c.favourites.snoozed, real.snoozed);
+  const inbox = db.prep(`SELECT count(*) AS n FROM message_labels ml JOIN messages m ON m.account_id=ml.account_id AND m.id=ml.message_id WHERE ml.label_id='INBOX' AND m.snooze_until IS NULL`).get().n;
+  assert.equal(c.favourites.inboxTotal, inbox, 'and the inbox total');
+
+  // a deliberately corrupted counter is spotted and repaired
+  db.prep("UPDATE label_counts SET unread = unread + 7 WHERE label_id = 'INBOX'").run();
+  assert.equal(db.labelCountDrift().length, 1, 'drift is detected');
+  db.recountLabels();
+  assert.deepEqual(db.labelCountDrift(), [], 'and repaired');
+});
+
+test('conversation view: walking the index agrees with grouping in SQL', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const b = db.addAccount({ email: 'b@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const at = (acc, id, ts, thread, labels) => db.upsertMessages(acc, [{ ...normaliseMessage(msg(id, labels)), internalDate: ts, threadId: thread }]);
+  // a mix: lone messages, a long thread, a thread whose newest message is binned, one with no thread at all
+  for (let i = 0; i < 60; i++) at(a.id, 'w' + i, 10000 + i, i % 5 === 0 ? 'long' : 'solo' + i, i % 7 === 0 ? ['INBOX', 'UNREAD'] : ['INBOX']);
+  at(a.id, 'gone', 99000, 'long', ['TRASH']);
+  at(a.id, 'nothread', 98000, null, ['INBOX']);
+  at(b.id, 'other', 97000, 'bthread', ['INBOX', 'UNREAD']);
+
+  for (const v of [{ kind: 'all-inboxes' }, { kind: 'label', accountId: a.id, labelId: 'INBOX' }, { kind: 'unread' }]) {
+    for (const page of [{ offset: 0, limit: 10 }, { offset: 5, limit: 10 }, { offset: 0, limit: 100 }]) {
+      const fast = db.listThreads(v, page);
+      const slow = db._listThreadsGrouped(v, page);
+      const shape = (rows) => rows.map(r => `${r.accountId}:${r.id}:${r.threadCount || 1}:${r.threadUnread || 0}`);
+      assert.deepEqual(shape(fast), shape(slow), `${v.kind} ${JSON.stringify(page)}`);
+    }
+  }
+  // the long thread is one row, counted over the view (its binned message doesn't count)
+  const inbox = db.listThreads({ kind: 'label', accountId: a.id, labelId: 'INBOX' }, { limit: 100 });
+  const long = inbox.find(r => r.threadId === 'long');
+  assert.equal(long.threadCount, 12, 'twelve of the long thread are in the inbox');
+  assert.equal(inbox.filter(r => r.threadId === 'long').length, 1, 'and it appears once');
+  assert.ok(inbox.some(r => r.id === 'nothread'), 'a message with no thread still shows');
+});
