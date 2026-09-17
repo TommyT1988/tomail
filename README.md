@@ -198,6 +198,7 @@ test/                     node:test suite (db, mime, batch parsing, sync, action
 
 | Version | Highlights |
 |---|---|
+| 0.9.6 | Proton Mail via Bridge; releases publish only once every file is uploaded |
 | 0.9.5 | Edit the quoted original when replying; a rate limiter that slows down when Gmail says to, instead of insisting |
 | 0.9.4 | Resizable folder list, draggable quoted mail, Reply at the top of a message, a version button that checks for updates, and some colour |
 | 0.9 | Tray icon with start-at-login, remembered window position, send-as aliases, oldest-first that opens on today, a settings dialog that stays put, new mail during a first sync, read-ahead so clicks are instant, and a mailbox of 200,000 that stops stalling |
