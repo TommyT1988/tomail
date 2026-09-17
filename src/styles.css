@@ -156,9 +156,30 @@ a { color: var(--accent); }
 .compose .atts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .compose .atts span { border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 12px; }
 .compose .ccbcc { color: var(--accent); font-size: 12px; padding: 0 4px; }
-.settings .tabs { padding: 0; margin-bottom: 12px; }
+/* Settings: a FIXED-size dialog with a left nav. Switching section must never resize or re-centre the
+   window, so the frame is fixed and only the right-hand pane scrolls. */
+.modal.settings { width: 940px; height: 660px; }
+.settings .mb { display: flex; padding: 0; flex: 1; min-height: 0; overflow: hidden; }
+.settings .snav { width: 200px; flex: none; border-right: 1px solid var(--border); background: var(--group); padding: 10px 8px; overflow: auto; }
+.settings .snav button { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 7px 10px; margin-bottom: 2px; border-radius: 6px; color: var(--text); }
+.settings .snav button .ic { flex: none; opacity: .75; }
+.settings .snav button:hover:not(.on) { background: var(--hover); }
+.settings .snav button.on { background: var(--accent); color: #fff; font-weight: 600; }
+.settings .snav button.on .ic { opacity: 1; }
+.settings .spane { flex: 1; min-width: 0; overflow: auto; padding: 16px 20px 22px; }
+.settings .shead { font-size: 16px; font-weight: 600; margin: 0 0 3px; }
+.settings .sdesc { color: var(--muted); font-size: 12px; margin: 0 0 16px; max-width: 62ch; }
+.settings .sgroup { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  margin: 20px 0 10px; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
+.settings .sgroup:first-of-type { margin-top: 4px; }
+.settings h3 { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  margin: 20px 0 10px; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
+.settings .mf .hint { color: var(--muted); font-size: 12px; }
 .settings .frow { display: grid; grid-template-columns: 190px 1fr; gap: 8px; align-items: center; margin-bottom: 10px; }
 .settings .frow small { grid-column: 2; color: var(--muted); }
+/* direct grid children would otherwise stretch the full width of the value column */
+.settings .frow > button, .settings .frow > select { justify-self: start; }
+.settings .frow > input[type=text], .settings .frow > input[type=password], .settings .frow > input[type=email] { max-width: 420px; }
 .settings .acct { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; }
 .settings .acct .em { font-weight: 600; }
 .settings .acct .spacer { flex: 1; }
@@ -173,7 +194,7 @@ a { color: var(--accent); }
 /* ── dark theme ── */
 :root.dark { --bg: #1e1f22; --panel: #26272b; --border: #3a3b40; --text: #e6e6e6; --muted: #a0a0a6; --faint: #6f6f76; --accent: #6ea0ec; --accent-bg: #2e3b52; --sel: #34456a; --hover: #2d3036; --group: #2b2c31; color-scheme: dark; }
 :root.dark .topbar, :root.dark .toolbar, :root.dark .status, :root.dark .read .hdr, :root.dark .split .divider,
-:root.dark .menu, :root.dark .modal, :root.dark input, :root.dark select, :root.dark textarea, :root.dark .read .att, :root.dark .settings .acct, :root.dark .onboard .steps, :root.dark .rich .tb { background: var(--panel); color: var(--text); }
+:root.dark .menu, :root.dark .modal, :root.dark input, :root.dark select, :root.dark textarea, :root.dark .read .att, :root.dark .settings .acct, :root.dark .settings .snav, :root.dark .onboard .steps, :root.dark .rich .tb { background: var(--panel); color: var(--text); }
 :root.dark button:hover:not(:disabled) { background: #3a3b40; } :root.dark .tree .item:hover { background: #2d3036; }
 :root.dark .row .lab, :root.dark code { background: #3a3b40; color: #ccc; } :root.dark .read .hdr .labs span { background: #2e3b52; color: #bcd0f0; }
 :root.dark .read .imgbar { background: #3d3520; border-color: #6b5b26; color: #e6e6e6; } :root.dark .tabs .tab.active { color: var(--accent); }

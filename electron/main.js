@@ -296,8 +296,20 @@ function createWindow() {
         await wait(1500);
         { const mw = [...messageWins.values()][0]; if (mw && !mw.isDestroyed()) { fs.writeFileSync(path.join(dir, '9-message-window.png'), (await mw.webContents.capturePage()).toPNG()); mw.close(); } }
         await wait(600); await shot('6-settings.png');
-        await js(`(() => { const b = [...document.querySelectorAll('.settings .tabs button')].find(b => /Rules/.test(b.textContent)); b && b.click(); })()`);
+        await js(`(() => { const b = [...document.querySelectorAll('.settings .snav button')].find(b => /Rules/.test(b.textContent)); b && b.click(); })()`);
         await wait(500); await shot('8-rules.png');
+        // the dialog must not resize or move as you walk the sections (that was the 0.9.x complaint)
+        log('SETTINGS geometry: ' + await js(`(async () => {
+          const out = [];
+          for (const b of [...document.querySelectorAll('.settings .snav button')]) {
+            b.click(); await new Promise(r => setTimeout(r, 260));
+            const m = document.querySelector('.modal.settings').getBoundingClientRect();
+            out.push(b.textContent.trim() + ' ' + Math.round(m.width) + 'x' + Math.round(m.height) + ' @' + Math.round(m.left) + ',' + Math.round(m.top));
+          }
+          return JSON.stringify(out);
+        })()`));
+        await js(`(() => { [...document.querySelectorAll('.settings .snav button')].find(b => /General/.test(b.textContent))?.click(); })()`);
+        await wait(400); await shot('13-settings.png');
         await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return window.mail.settings.set({ prefs: { theme: 'dark' } }).then(() => { document.documentElement.dataset.theme = 'dark'; }); })()`);
         await js(`(() => { document.documentElement.classList.add('dark'); const r = [...document.querySelectorAll('.row')].find(r => r.textContent.includes('Amazon Europe')); if (r) r.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); })()`);
         await wait(900); await shot('7-dark.png');
