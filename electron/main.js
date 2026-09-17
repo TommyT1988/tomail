@@ -198,6 +198,10 @@ function createWindow() {
         await js(`(() => { document.documentElement.classList.add('dark'); const r = [...document.querySelectorAll('.row')].find(r => r.textContent.includes('Amazon Europe')); if (r) r.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); })()`);
         await wait(900); await shot('7-dark.png');
         await js(`window.mail.settings.set({ prefs: { theme: 'system' } })`);
+        // Oldest-first: clicking Received twice flips the sort — the list must land on TODAY at the bottom.
+        await js(`(() => { document.documentElement.classList.remove('dark'); const th = [...document.querySelectorAll('.cols .th')].find(t => /Received/.test(t.textContent)); if (th) { th.click(); setTimeout(() => th.click(), 400); } })()`);
+        await wait(2000); await shot('10-oldest-first.png');
+        log('oldest-first scroll:', await js(`(() => { const el = document.querySelector('.rows'); const g = [...el.querySelectorAll('.grp')].pop(); return JSON.stringify({ atBottom: el.scrollHeight - el.scrollTop - el.clientHeight, lastGroup: g && g.textContent }); })()`));
       } catch (e) { log('screenshot failed:', e.message); }
       app.quit();
     });

@@ -1,9 +1,11 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { CATEGORIES, dayGroup, fmtAddr, fmtSize, fmtTime, keyOf } from '../util.js';
 import Icon from './Icons.jsx';
 
-export default function MessageList({ items, total, loading, view, setView, selected, onSelect, onOpen, onLoadMore, hasMore, accounts, labelsById, showCategories, onKey, threaded, setThreaded, onSort }) {
+export default function MessageList({ items, total, loading, view, setView, selected, onSelect, onOpen, onLoadMore, hasMore, ascending, accounts, labelsById, showCategories, onKey, threaded, setThreaded, onSort }) {
   const ref = useRef(null);
+  const anchor = useRef({ viewKey: null, firstKey: null, len: 0, h: 0, top: 0, atEnd: true });
+  const viewKey = useMemo(() => JSON.stringify(view), [view]);
   const selSet = useMemo(() => new Set(selected.map(keyOf)), [selected]);
   const multiAccount = accounts.length > 1;
   const sortCol = view.sort?.col || 'date', sortDir = view.sort?.dir || 'desc';
@@ -16,9 +18,20 @@ export default function MessageList({ items, total, loading, view, setView, sele
   const Th = ({ col, children, right }) => <span className={'th' + (sortCol === col ? ' on' : '')} style={right ? { textAlign: 'right' } : undefined} onClick={() => onSort?.(col)} title="Click to sort">{children}{sortCol === col && <span className="arrow">{sortDir === 'asc' ? '▲' : '▼'}</span>}</span>;
   useEffect(() => {
     const el = ref.current; if (!el) return;
-    const h = () => { if (hasMore && !loading && el.scrollTop + el.clientHeight > el.scrollHeight - 300) onLoadMore(); };
+    const h = () => { if (hasMore && !loading && (ascending ? el.scrollTop < 300 : el.scrollTop + el.clientHeight > el.scrollHeight - 300)) onLoadMore(); };
     el.addEventListener('scroll', h); return () => el.removeEventListener('scroll', h);
-  }, [hasMore, loading, onLoadMore]);
+  }, [hasMore, loading, onLoadMore, ascending]);
+  // Newest-at-the-bottom: open on the newest mail, hold your place when older pages load in above you,
+  // and stay pinned to the bottom (today) when a background refresh brings new mail in.
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    const firstKey = items.length ? keyOf(items[0]) : null;
+    const p = anchor.current;
+    if (p.viewKey !== viewKey) el.scrollTop = ascending ? el.scrollHeight : 0;
+    else if (ascending && items.length > p.len && firstKey !== p.firstKey) el.scrollTop = el.scrollHeight - p.h + p.top;
+    else if (ascending && p.atEnd) el.scrollTop = el.scrollHeight;
+    anchor.current = { viewKey, firstKey, len: items.length, h: el.scrollHeight, top: el.scrollTop, atEnd: el.scrollHeight - el.scrollTop - el.clientHeight < 60 };
+  }, [items, ascending, viewKey]);
   useEffect(() => {
     if (!selected.length) return;
     const k = keyOf(selected[selected.length - 1]);
@@ -41,6 +54,7 @@ export default function MessageList({ items, total, loading, view, setView, sele
       </div>
       <div className="cols"><span /><Th col="from">{isDrafts ? 'To' : 'From'}</Th><Th col="subject">Subject</Th><Th col="date" right>{isDrafts ? 'Saved' : 'Received'}</Th><Th col="size" right>Size</Th></div>
       <div className="rows" ref={ref} tabIndex={0} onKeyDown={onKey}>
+        {hasMore && ascending && <div className="loadmore"><button onClick={onLoadMore} disabled={loading}>{loading ? 'Loading…' : 'Load older'}</button></div>}
         {!items.length && !loading && <div className="empty"><div className="big">▭</div><div>{isDrafts ? 'No drafts' : 'No messages here'}</div></div>}
         {groups.map(g => (
           <React.Fragment key={g.name || 'all'}>
@@ -61,7 +75,7 @@ export default function MessageList({ items, total, loading, view, setView, sele
             })}
           </React.Fragment>
         ))}
-        {hasMore && <div className="loadmore"><button onClick={onLoadMore} disabled={loading}>{loading ? 'Loading…' : 'Load more'}</button></div>}
+        {hasMore && !ascending && <div className="loadmore"><button onClick={onLoadMore} disabled={loading}>{loading ? 'Loading…' : 'Load more'}</button></div>}
       </div>
     </>
   );

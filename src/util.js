@@ -67,6 +67,18 @@ export function labelTree(labels) {
 }
 export function keyOf(t) { return `${t.accountId}:${t.id}`; }
 export function sameView(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+/** Date-ascending views (newest at the bottom) are anchored at their NEWEST end, not their oldest. */
+export function isDateAsc(view) { return (view?.sort?.col || 'date') === 'date' && view?.sort?.dir === 'asc'; }
+/**
+ * Merge a freshly fetched page into the list. Ascending views fetch newest-first and show the page
+ * reversed, with each older page going ABOVE what's loaded — so page 1 is today, not 2019.
+ */
+export function mergePage(prev, rows, { asc = false, append = false } = {}) {
+  const page = asc ? rows.slice().reverse() : rows;
+  if (!append) return page;
+  return asc ? [...page, ...prev] : [...prev, ...page];
+}
 export function escapeHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
 /** Snooze presets → epoch ms */

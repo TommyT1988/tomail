@@ -256,3 +256,43 @@ test('list query uses the (account, date) index', () => {
   assert.match(plan, /messages_acct_date/);
   db.analyze(); assert.ok(db.kvGet('lastAnalyze'));
 });
+
+test('list: oldest-first pages from the newest end (today is on page 1)', () => {
+  const { isDateAsc, mergePage } = require('../src/util.js');
+  const { MailDb } = require('../electron/db');
+  assert.equal(isDateAsc({ kind: 'all' }), false);                               // default = newest first
+  assert.equal(isDateAsc({ kind: 'all', sort: { col: 'date', dir: 'asc' } }), true);
+  assert.equal(isDateAsc({ kind: 'all', sort: { col: 'size', dir: 'asc' } }), false);
+
+  // 250 messages, one per day; the newest is "today".
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const day = 86400000, today = 1_700_000_000_000;
+  db.upsertMessages(a.id, Array.from({ length: 250 }, (_, i) => normaliseMessage(
+    msg('d' + i, ['INBOX'], {})
+  )).map((m, i) => ({ ...m, internalDate: today - (249 - i) * day })));
+
+  const view = { kind: 'all', sort: { col: 'date', dir: 'asc' } };
+  const asc = isDateAsc(view);
+  const query = { ...view, sort: asc ? { col: 'date', dir: 'desc' } : view.sort };
+
+  let items = mergePage([], db.listMessages(query, { offset: 0, limit: 100 }), { asc });
+  assert.equal(items.length, 100);
+  assert.equal(items[items.length - 1].date, today);            // newest sits at the BOTTOM
+  assert.equal(items[0].date, today - 99 * day);                // 100 newest only — no 2019 scroll
+  assert.ok(items.every((m, i) => i === 0 || m.date >= items[i - 1].date)); // displayed oldest → newest
+
+  // "Load older" prepends the page above what's loaded, keeping the run ascending.
+  items = mergePage(items, db.listMessages(query, { offset: 100, limit: 100 }), { asc, append: true });
+  assert.equal(items.length, 200);
+  assert.equal(items[items.length - 1].date, today);            // today never moves off the bottom
+  assert.equal(items[0].date, today - 199 * day);
+  assert.ok(items.every((m, i) => i === 0 || m.date >= items[i - 1].date));
+
+  // Newest-first is untouched: page 1 is the newest, appended below.
+  const desc = mergePage([], db.listMessages({ kind: 'all' }, { offset: 0, limit: 100 }), { asc: false });
+  assert.equal(desc[0].date, today);
+  const desc2 = mergePage(desc, db.listMessages({ kind: 'all' }, { offset: 100, limit: 100 }), { asc: false, append: true });
+  assert.equal(desc2.length, 200);
+  assert.equal(desc2[199].date, today - 199 * day);
+});

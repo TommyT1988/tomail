@@ -4,10 +4,13 @@ import MessageList from './components/MessageList.jsx';
 import ReadingPane from './components/ReadingPane.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import { Dropdown, MI, MarkMenu, QuickActionsMenu, SnoozeMenu, FilterMenu } from './components/Menus.jsx';
-import { ago, gmailQuery, keyOf, sameView, parseSearch, followUpPresets, sendLaterPresets } from './util.js';
+import { ago, gmailQuery, keyOf, sameView, isDateAsc, mergePage, parseSearch, followUpPresets, sendLaterPresets } from './util.js';
 import Icon from './components/Icons.jsx';
 
 const PAGE = 100;
+/** Newest-first vs oldest-first is a standing preference, not a per-folder one — it survives folder clicks and restarts. */
+const savedDateSort = () => (localStorage.getItem('dateSort') === 'asc' ? { col: 'date', dir: 'asc' } : undefined);
+const withSavedSort = (v) => (v && v.sort === undefined ? { ...v, sort: savedDateSort() } : v);
 const mail = window.mail;
 const HOME = { kind: 'all-inboxes', category: 'primary' };
 
@@ -26,7 +29,7 @@ export default function App() {
   const [counts, setCounts] = useState(null);
   const [drafts, setDrafts] = useState({ local: [], remote: [] });
   const [status, setStatus] = useState({ accounts: {}, lastCheckedAt: null });
-  const [view, setViewRaw] = useState(HOME);
+  const [view, setViewRaw] = useState(() => withSavedSort(HOME));
   const [threaded, setThreadedRaw] = useState(() => localStorage.getItem('threaded') === '1');
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(null);
@@ -68,7 +71,7 @@ export default function App() {
 
   const toast = useCallback((m, err, undo) => { setToastMsg({ m, err, undo }); setTimeout(() => setToastMsg(t => (t?.m === m ? null : t)), err ? 6000 : undo ? 8000 : 2500); }, []);
   const labelsById = useMemo(() => { const o = {}; for (const [aid, ls] of Object.entries(labels)) o[aid] = Object.fromEntries(ls.map(l => [l.id, l])); return o; }, [labels]);
-  const setView = useCallback((v) => { setViewRaw(v); setSelected([]); setAnchor(null); setMessage(null); setThread(null); setMsgError(null); setQuickReplyFocus(false); }, []);
+  const setView = useCallback((v) => { setViewRaw(withSavedSort(v)); setSelected([]); setAnchor(null); setMessage(null); setThread(null); setMsgError(null); setQuickReplyFocus(false); }, []);
   useEffect(() => { setTabs(ts => ts.map(t => t.id === activeTab && t.kind !== 'message' ? { ...t, view } : t)); }, [view, activeTab]);
   useEffect(() => { try { localStorage.setItem('tabs', JSON.stringify(tabs.map(t => ({ id: t.id, view: t.view, kind: t.kind, msg: t.msg, title: t.title })))); localStorage.setItem('activeTab', String(activeTab)); } catch {} }, [tabs, activeTab]);
   const openTab = (v, opts = {}) => { const id = Date.now(); setTabs(ts => [...ts, { id, view: v, ...opts }]); setActiveTab(id); if (opts.kind !== 'message') setView(v); };
@@ -107,10 +110,13 @@ export default function App() {
       const offset = append ? itemsRef.current.length : 0;
       // keep: reload everything currently shown (rounded up to a page) so a background refresh doesn't snap a scrolled list back to the top
       const limit = keep ? Math.max(PAGE, Math.ceil(itemsRef.current.length / PAGE) * PAGE) : PAGE;
-      const q = { ...v, threaded: threadedRef.current && !['drafts', 'snoozed'].includes(v.kind) };
+      // Oldest-first still PAGES FROM THE NEWEST END: ask for newest-first, show the page reversed, put older
+      // pages ABOVE. Paging from the oldest end put today thousands of rows below page 1.
+      const asc = isDateAsc(v);
+      const q = { ...v, sort: asc ? { col: 'date', dir: 'desc' } : v.sort, threaded: threadedRef.current && !['drafts', 'snoozed'].includes(v.kind) };
       const [rows, n] = await Promise.all([mail.messages.list(q, { offset, limit }), append ? Promise.resolve(null) : mail.messages.count(q)]);
       if (!sameView(viewRef.current, v)) return;
-      setItems(append ? [...itemsRef.current, ...rows] : rows);
+      setItems(mergePage(itemsRef.current, rows, { asc, append }));
       if (n != null) setTotal(n);
       setHasMore(rows.length === limit);
     } catch (e) { toast(e.message, true); }
@@ -246,7 +252,7 @@ export default function App() {
     const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); localStorage.setItem('listH', String(listH)); };
     document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
   };
-  const onSort = (col) => { const cur = view.sort || { col: 'date', dir: 'desc' }; const dir = cur.col === col ? (cur.dir === 'desc' ? 'asc' : 'desc') : (col === 'date' || col === 'size' ? 'desc' : 'asc'); setViewRaw({ ...view, sort: col === 'date' && dir === 'desc' ? undefined : { col, dir } }); };
+  const onSort = (col) => { const cur = view.sort || { col: 'date', dir: 'desc' }; const dir = cur.col === col ? (cur.dir === 'desc' ? 'asc' : 'desc') : (col === 'date' || col === 'size' ? 'desc' : 'asc'); if (col === 'date') localStorage.setItem('dateSort', dir); setViewRaw({ ...view, sort: col === 'date' && dir === 'desc' ? undefined : { col, dir } }); };
   const setFilters = (f) => { const clean = Object.fromEntries(Object.entries(f || {}).filter(([, v]) => v !== undefined && v !== '' && v !== false)); setView({ ...view, filters: Object.keys(clean).length ? clean : undefined }); };
   const filterChips = Object.entries(view.filters || {}).map(([k, v]) => [k, k === 'accountId' ? accounts.find(a => a.id === v)?.email : k === 'labelId' ? (labelsById[view.accountId]?.[v]?.name || Object.values(labelsById).map(m => m[v]?.name).find(Boolean) || v) : /after|before/.test(k) ? new Date(Number(v)).toLocaleDateString('en-GB') : v === true ? '' : v]);
 
@@ -319,7 +325,7 @@ export default function App() {
               <div className="list-wrap" style={{ height: listH }}>
                 {filterChips.length > 0 && <div className="chips"><Icon name="settings" size={12} /> {filterChips.map(([k, v]) => <span className="chip" key={k}>{k}{v ? `: ${v}` : ''}<button onClick={() => setFilters({ ...view.filters, [k]: undefined })}>✕</button></span>)}<button style={{ fontSize: 11 }} onClick={() => setFilters({})}>clear</button></div>}
                 <MessageList items={items} total={total} loading={loading} view={view} setView={setViewRaw} selected={selected} onSelect={onSelect}
-                  onOpen={(m) => { setSelected([{ accountId: m.accountId, id: m.id }]); openItem(m); }} onLoadMore={() => loadList(view, { append: true })} hasMore={hasMore}
+                  onOpen={(m) => { setSelected([{ accountId: m.accountId, id: m.id }]); openItem(m); }} onLoadMore={() => loadList(view, { append: true })} hasMore={hasMore} ascending={isDateAsc(view)}
                   accounts={accounts} labelsById={labelsById} showCategories={showCategories} onKey={onKey} threaded={threaded} setThreaded={setThreaded} onSort={onSort} />
               </div>
               <div className="divider" onMouseDown={startDrag} />
