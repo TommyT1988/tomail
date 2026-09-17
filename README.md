@@ -14,9 +14,8 @@ Grab the installer for your machine from the **[latest release](https://github.c
 
 | Platform | File |
 |---|---|
-| Windows (x64) | `Tomail-x.y.z-win-x64.exe` |
+| Windows (x64) | `Tomail-x.y.z-win-x64.exe` — this is the one for almost every PC |
 | Windows on ARM | `Tomail-x.y.z-win-arm64.exe` |
-| Windows, either (bigger) | `Tomail-x.y.z-win.exe` — one installer carrying both, picks the right one |
 | macOS, Apple Silicon | `Tomail-x.y.z-mac-arm64.dmg` |
 | macOS, Intel | `Tomail-x.y.z-mac-x64.dmg` |
 | Linux (x64) | `Tomail-x.y.z-linux-x86_64.AppImage` or `-linux-amd64.deb` |

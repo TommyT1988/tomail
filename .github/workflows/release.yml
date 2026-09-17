@@ -47,7 +47,7 @@ jobs:
           # latest-mac.yml is deliberately NOT required: electron-updater can only update macOS from a
           # .zip, which we don't publish while the build is unsigned, so the file may not be generated.
           MISSING=""
-          for f in "Tomail-$VER-win-x64.exe" "Tomail-$VER-win-arm64.exe" "Tomail-$VER-win.exe" \
+          for f in "Tomail-$VER-win-x64.exe" "Tomail-$VER-win-arm64.exe" \
                    "Tomail-$VER-mac-x64.dmg" "Tomail-$VER-mac-arm64.dmg" \
                    "Tomail-$VER-linux-x86_64.AppImage" "Tomail-$VER-linux-arm64.AppImage" \
                    "Tomail-$VER-linux-amd64.deb" "Tomail-$VER-linux-arm64.deb" \
