@@ -8,7 +8,7 @@ async function call(channel, ...args) {
 const api = {
   accounts: {
     list: () => call('accounts:list'), add: (opts) => call('accounts:add', opts), remove: (id) => call('accounts:remove', id),
-    resync: (id) => call('accounts:resync', id), reorder: (ids) => call('accounts:reorder', ids), rename: (id, name) => call('accounts:rename', id, name), setSignature: (id, sig) => call('accounts:setSignature', id, sig),
+    resync: (id) => call('accounts:resync', id), reorder: (ids) => call('accounts:reorder', ids), rename: (id, name) => call('accounts:rename', id, name), setSignature: (id, sig) => call('accounts:setSignature', id, sig), setAliases: (id, list) => call('accounts:setAliases', id, list),
     autoconfig: (email) => call('accounts:autoconfig', email), testImap: (cfg) => call('accounts:testImap', cfg), addImap: (cfg) => call('accounts:addImap', cfg),
   },
   settings: { get: () => call('settings:get'), set: (patch) => call('settings:set', patch) },

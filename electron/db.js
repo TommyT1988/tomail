@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   kind TEXT NOT NULL DEFAULT 'gmail',
   imap_json TEXT,
   signature TEXT,
-  scopes TEXT
+  scopes TEXT,
+  aliases TEXT
 );
 CREATE TABLE IF NOT EXISTS labels (
   account_id INTEGER NOT NULL,
@@ -92,6 +93,7 @@ CREATE TABLE IF NOT EXISTS drafts (
   attachments_json TEXT,
   quoted_html TEXT, quoted_text TEXT, include_orig_atts INTEGER NOT NULL DEFAULT 0,
   remote_id TEXT, remote_message_id TEXT, remote_synced_at INTEGER,
+  from_email TEXT,
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS messages_date ON messages(internal_date DESC);
@@ -199,6 +201,7 @@ class MailDb {
     const cols = (t) => new Set(this.db.prepare(`PRAGMA table_info(${t})`).all().map(c => c.name));
     const add = (t, col, def) => { if (!cols(t).has(col)) this.db.exec(`ALTER TABLE ${t} ADD COLUMN ${col} ${def}`); };
     add('accounts', 'kind', "TEXT NOT NULL DEFAULT 'gmail'"); add('accounts', 'imap_json', 'TEXT'); add('accounts', 'signature', 'TEXT'); add('accounts', 'scopes', 'TEXT');
+    add('accounts', 'aliases', 'TEXT'); add('drafts', 'from_email', 'TEXT');
     add('labels', 'imap_path', 'TEXT');
     add('messages', 'answered', 'INTEGER NOT NULL DEFAULT 0'); add('messages', 'calendar_json', 'TEXT');
     add('drafts', 'remote_message_id', 'TEXT'); add('contacts', 'source', 'TEXT'); add('messages', 'auth_json', 'TEXT'); add('messages', 'ai_summary', 'TEXT'); add('messages', 'imap_folder', 'TEXT'); add('messages', 'imap_uid', 'INTEGER');
@@ -216,7 +219,7 @@ class MailDb {
 
   // ── accounts ──────────────────────────────────────────────────────────
   listAccounts() {
-    return this.prep('SELECT * FROM accounts ORDER BY position, id').all().map(a => ({ ...a, token_enc: undefined, imap_json: undefined, imap: publicImap(a.imap_json) }));
+    return this.prep('SELECT * FROM accounts ORDER BY position, id').all().map(a => ({ ...a, token_enc: undefined, imap_json: undefined, imap: publicImap(a.imap_json), aliases: safeJson(a.aliases, []), identities: this.identities(a.id) }));
   }
   getAccount(id) { return this.prep('SELECT * FROM accounts WHERE id = ?').get(id) || null; }
   getAccountByEmail(email) { return this.prep('SELECT * FROM accounts WHERE email = ?').get(email) || null; }
@@ -225,6 +228,33 @@ class MailDb {
     this.prep('INSERT INTO accounts (email, display_name, token_enc, position, kind, imap_json) VALUES (?,?,?,?,?,?)')
       .run(email, displayName || null, tokenEnc, pos, kind, imapJson);
     return this.getAccountByEmail(email);
+  }
+  /** Every address this account may send as: its own first, then the aliases set up on the provider. */
+  identities(accountId) {
+    const a = this.prep('SELECT email, display_name, aliases FROM accounts WHERE id = ?').get(accountId);
+    if (!a) return [];
+    const primary = { email: a.email, name: a.display_name && a.display_name !== a.email ? a.display_name : '' };
+    const seen = new Set([a.email.toLowerCase()]);
+    const rest = [];
+    for (const x of safeJson(a.aliases, [])) {
+      const email = String(x?.email || '').trim().toLowerCase();
+      if (!email || seen.has(email)) continue;
+      seen.add(email);
+      rest.push({ email, name: String(x?.name || '').trim(), alias: true });
+    }
+    return [primary, ...rest];
+  }
+  setAliases(accountId, list) {
+    const seen = new Set();
+    const clean = [];
+    for (const x of list || []) {
+      const email = String(x?.email || '').trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || seen.has(email)) continue;
+      seen.add(email);
+      clean.push({ email, name: String(x?.name || '').trim() });
+    }
+    this.updateAccount(accountId, { aliases: JSON.stringify(clean) });
+    return this.identities(accountId);
   }
   reorderAccounts(ids) { this.tx(() => ids.forEach((id, i) => this.prep('UPDATE accounts SET position = ? WHERE id = ?').run(i + 1, id))); }
   updateAccount(id, fields) {
@@ -655,15 +685,15 @@ class MailDb {
     const now = Date.now();
     if (d.id) {
       this.prep(`UPDATE drafts SET account_id=?, mode=?, reply_account_id=?, reply_message_id=?, to_text=?, cc_text=?, bcc_text=?, subject=?, body_html=?, body_text=?,
-        attachments_json=?, quoted_html=?, quoted_text=?, include_orig_atts=?, updated_at=? WHERE id = ?`)
+        attachments_json=?, quoted_html=?, quoted_text=?, include_orig_atts=?, from_email=?, updated_at=? WHERE id = ?`)
         .run(d.accountId, d.mode || 'new', d.replyTo?.accountId ?? null, d.replyTo?.id ?? null, d.to || '', d.cc || '', d.bcc || '', d.subject || '', d.bodyHtml || '', d.bodyText || '',
-          JSON.stringify(d.attachments || []), d.quotedHtml || null, d.quotedText || null, d.includeOrigAtts ? 1 : 0, now, d.id);
+          JSON.stringify(d.attachments || []), d.quotedHtml || null, d.quotedText || null, d.includeOrigAtts ? 1 : 0, d.from || null, now, d.id);
       return this.getDraft(d.id);
     }
-    const r = this.prep(`INSERT INTO drafts (account_id, mode, reply_account_id, reply_message_id, to_text, cc_text, bcc_text, subject, body_html, body_text, attachments_json, quoted_html, quoted_text, include_orig_atts, remote_id, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    const r = this.prep(`INSERT INTO drafts (account_id, mode, reply_account_id, reply_message_id, to_text, cc_text, bcc_text, subject, body_html, body_text, attachments_json, quoted_html, quoted_text, include_orig_atts, remote_id, from_email, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(d.accountId, d.mode || 'new', d.replyTo?.accountId ?? null, d.replyTo?.id ?? null, d.to || '', d.cc || '', d.bcc || '', d.subject || '', d.bodyHtml || '', d.bodyText || '',
-        JSON.stringify(d.attachments || []), d.quotedHtml || null, d.quotedText || null, d.includeOrigAtts ? 1 : 0, d.remoteId || null, now);
+        JSON.stringify(d.attachments || []), d.quotedHtml || null, d.quotedText || null, d.includeOrigAtts ? 1 : 0, d.remoteId || null, d.from || null, now);
     return this.getDraft(Number(r.lastInsertRowid));
   }
   setDraftRemote(id, remoteId, remoteMessageId) { this.prep('UPDATE drafts SET remote_id = ?, remote_message_id = ?, remote_synced_at = ? WHERE id = ?').run(remoteId, remoteMessageId || null, Date.now(), id); }
@@ -737,7 +767,7 @@ function rowToDraft(r) {
   return { id: r.id, accountId: r.account_id, mode: r.mode, replyTo: r.reply_message_id ? { accountId: r.reply_account_id, id: r.reply_message_id } : null,
     to: r.to_text || '', cc: r.cc_text || '', bcc: r.bcc_text || '', subject: r.subject || '', bodyHtml: r.body_html || '', bodyText: r.body_text || '',
     attachments: safeJson(r.attachments_json, []), quotedHtml: r.quoted_html, quotedText: r.quoted_text, includeOrigAtts: !!r.include_orig_atts,
-    remoteId: r.remote_id, remoteMessageId: r.remote_message_id, updatedAt: r.updated_at };
+    from: r.from_email || null, remoteId: r.remote_id, remoteMessageId: r.remote_message_id, updatedAt: r.updated_at };
 }
 function publicImap(json) {
   if (!json) return null;

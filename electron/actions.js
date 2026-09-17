@@ -144,9 +144,15 @@ class Actions {
   }
 
   // ── compose ──
-  fromHeader(acct) {
-    const name = acct.display_name && acct.display_name !== acct.email ? acct.display_name : '';
-    return name ? `"${name.replace(/"/g, '')}" <${acct.email}>` : acct.email;
+  /** The identity a message goes out as: an alias when one was picked, the account's own address otherwise. */
+  identity(acct, fromEmail) {
+    const ids = this.db.identities(acct.id);
+    const want = String(fromEmail || '').trim().toLowerCase();
+    return (want && ids.find(i => i.email === want)) || ids[0] || { email: acct.email, name: '' };
+  }
+  fromHeader(acct, fromEmail) {
+    const { email, name } = this.identity(acct, fromEmail);
+    return name ? `"${name.replace(/"/g, '')}" <${email}>` : email;
   }
   /** Build the raw MIME for a draft/send payload. */
   async buildOutgoing(opts, acct) {
@@ -163,8 +169,9 @@ class Actions {
       const orig = this.db.getMessage(opts.replyTo.accountId, opts.replyTo.id);
       for (const a of orig?.attachments || []) { if (a.attachmentId == null) continue; attachments.push({ filename: a.filename, contentType: a.mimeType, content: await this.getAttachment(opts.replyTo.accountId, opts.replyTo.id, a.attachmentId) }); }
     }
-    const messageId = `<${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 10)}@${acct.email.split('@')[1] || 'tomail'}>`;
-    const raw = await buildRaw({ from: this.fromHeader(acct), to: opts.to, cc: opts.cc, bcc: opts.bcc, subject: opts.subject, text, html, attachments, inReplyTo, references, icalEvent: opts.icalEvent, messageId });
+    const me = this.identity(acct, opts.from);
+    const messageId = `<${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 10)}@${me.email.split('@')[1] || 'tomail'}>`;
+    const raw = await buildRaw({ from: this.fromHeader(acct, opts.from), to: opts.to, cc: opts.cc, bcc: opts.bcc, subject: opts.subject, text, html, attachments, inReplyTo, references, icalEvent: opts.icalEvent, messageId });
     return { raw, threadId, messageId };
   }
   isNetworkError(e) { return /fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|socket hang up|network|Connection not available|timed out/i.test(e?.message || '') || /^(ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN)/.test(e?.code || ''); }
@@ -207,6 +214,11 @@ class Actions {
   async sendNow(opts) {
     const acct = this.db.getAccount(opts.accountId);
     if (!acct) throw new Error('Unknown account');
+    // Refuse to send as an address that isn't one of this account's identities, rather than
+    // quietly falling back — the provider would rewrite or reject it anyway.
+    if (opts.from && !this.db.identities(acct.id).some(i => i.email === String(opts.from).toLowerCase())) {
+      throw new Error(`${opts.from} is not one of ${acct.email}'s addresses — add it under Settings → Accounts → Aliases`);
+    }
     const { raw, threadId, messageId } = await this.buildOutgoing(opts, acct);
     const p = this.providers(opts.accountId);
     const sent = await p.send({ raw, threadId });
@@ -225,7 +237,7 @@ class Actions {
   async setLabelColor(accountId, id, bg, fg) { await this.providers(accountId).setLabelColor(id, bg, fg); this.onChange(); }
 
   // ── follow-ups ──
-  ownEmails() { return this.db.listAccounts().map(a => a.email); }
+  ownEmails() { return this.db.listAccounts().flatMap(a => a.identities.map(i => i.email)); }   // aliases count as us too
   addFollowup(accountId, messageId, dueAt) {
     const m = this.db.getMessage(accountId, messageId); if (!m) throw new Error('Message not found');
     const id = this.db.addFollowup({ accountId, messageId, threadId: m.threadId, messageIdHdr: m.messageIdHdr, subject: m.subject, to: (m.to || []).map(a => a.email).join(', ') || m.fromEmail, dueAt });

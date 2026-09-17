@@ -296,3 +296,37 @@ test('list: oldest-first pages from the newest end (today is on page 1)', () => 
   assert.equal(desc2.length, 200);
   assert.equal(desc2[199].date, today - 199 * day);
 });
+
+test('aliases: identities, validation, and sending as one', async () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'alex@example.com', displayName: 'Alex', tokenEnc: Buffer.from('plain:{}') });
+  assert.deepEqual(db.identities(a.id), [{ email: 'alex@example.com', name: 'Alex' }]);
+
+  // stored lower-cased, de-duped against the account's own address, junk dropped
+  db.setAliases(a.id, [{ email: 'Sales@Example.com', name: 'Sales' }, { email: 'sales@example.com' }, { email: 'nope' }, { email: 'alex@example.com' }]);
+  assert.deepEqual(db.identities(a.id), [
+    { email: 'alex@example.com', name: 'Alex' },
+    { email: 'sales@example.com', name: 'Sales', alias: true },
+  ]);
+  assert.equal(db.listAccounts()[0].identities.length, 2);
+
+  let sentRaw = null;
+  const actions = new Actions({ db, providers: () => ({ send: async ({ raw }) => { sentRaw = raw; return { id: 'x1' }; }, saveDraft: async () => ({ id: 'd1' }) }), onChange: () => {}, log: () => {} });
+  const decode = () => Buffer.from(sentRaw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString();
+
+  await actions.send({ accountId: a.id, to: 'b@x.com', subject: 'Hi', text: 'hi' });
+  assert.match(decode(), /^From: Alex <alex@example.com>$/m);         // default identity unchanged
+
+  await actions.send({ accountId: a.id, from: 'sales@example.com', to: 'b@x.com', subject: 'Hi', text: 'hi' });
+  assert.match(decode(), /^From: Sales <sales@example.com>$/m);       // sent as the alias
+
+  await assert.rejects(() => actions.send({ accountId: a.id, from: 'someone@else.com', to: 'b@x.com', subject: 'Hi', text: 'hi' }),
+    /not one of alex@example.com's addresses/);                          // never send as an address we don't own
+
+  // a draft remembers which identity it was written as
+  const d = await actions.saveDraft({ accountId: a.id, from: 'sales@example.com', to: 'b@x.com', subject: 'Later', bodyHtml: '<p>x</p>', bodyText: 'x' }, { syncRemote: false });
+  assert.equal(db.getDraft(d.id).from, 'sales@example.com');
+
+  // and an alias counts as "us" when deciding whether a thread got a reply
+  assert.ok(actions.ownEmails().includes('sales@example.com'));
+});

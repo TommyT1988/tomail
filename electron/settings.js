@@ -4,7 +4,10 @@ const path = require('node:path');
 
 const DEFAULTS = {
   oauth: { clientId: '', clientSecret: '' },
-  prefs: { syncIntervalSec: 60, fastPollSec: 20, loadRemoteImages: false, signature: '', markReadDelayMs: 1500, sendDelaySec: 5, bodyRetentionDays: 0 },
+  // tray/closeToTray default on so a closed window doesn't stop new-mail notifications; macOS already
+  // keeps running without windows, so it gets no tray icon unless asked.
+  prefs: { syncIntervalSec: 60, fastPollSec: 20, loadRemoteImages: false, signature: '', markReadDelayMs: 1500, sendDelaySec: 5, bodyRetentionDays: 0,
+    tray: process.platform !== 'darwin', closeToTray: true, startAtLogin: false },
 };
 
 class Settings {

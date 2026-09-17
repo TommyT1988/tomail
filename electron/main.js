@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage, Menu, Notification, nativeImage, nativeTheme, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage, Menu, Tray, screen, Notification, nativeImage, nativeTheme, protocol, net } = require('electron');
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -43,11 +43,18 @@ function registerAppProtocol() {
 }
 app.setName('Tomail');
 app.setPath('userData', path.join(app.getPath('appData'), DEMO ? 'tomail-demo' : 'tomail'));
+// One copy per mailbox: launching again (or the start-at-login entry firing twice) focuses the running
+// window rather than opening a second Tomail on the same database.
+if (!app.requestSingleInstanceLock()) app.quit();
+else app.on('second-instance', () => { try { showMainWindow(); } catch {} });
 log = createLogger(path.join(app.getPath('userData'), 'logs', 'tomail.log'));
 const ICON = path.join(__dirname, '..', 'build', 'icon.png');
 if (process.platform === 'win32') app.setAppUserModelId('app.tomail.desktop');
 
 let win, db, settings, accounts, actions;
+let tray = null;
+let isQuitting = false;
+let startHidden = process.argv.includes('--hidden');   // set by the start-at-login entry
 const previewWins = new WeakSet();   // attachment viewers: the only windows allowed to show a file: URL
 const PREVIEW_TYPES = /^(image\/(png|jpe?g|gif|webp|bmp|svg\+xml)|application\/pdf|text\/plain)$/i;
 const composeWins = new Map();   // id → { win, payload }
@@ -126,7 +133,7 @@ function notifyNewMail(accountId, ids) {
   const extra = ids.length - msgs.length;
   for (const m of msgs) {
     const n = new Notification({ title: (m.fromName || m.fromEmail || 'New mail') + (extra > 0 && m === msgs[msgs.length - 1] ? ` (+${extra} more)` : ''), body: (m.subject || '(no subject)') + (m.snippet ? '\n' + m.snippet : ''), silent: false, hasReply: process.platform === 'darwin', replyPlaceholder: 'Reply…' });
-    n.on('click', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); send('app:open-message', { accountId, id: m.id, quickReply: true }); } });
+    n.on('click', () => { showMainWindow(); send('app:open-message', { accountId, id: m.id, quickReply: true }); });
     n.on('reply', (_e, text) => { if (text?.trim()) ipcMain.emit('quick-reply', null, accountId, m.id, text); });
     n.show();
   }
@@ -148,13 +155,105 @@ app.on('web-contents-created', (_e, wc) => {
   wc.on('will-attach-webview', (ev) => ev.preventDefault());
   wc.setWindowOpenHandler(({ url }) => { openLink(url); return { action: 'deny' }; });
 });
+/** Bring the main window back, recreating it if it was closed to the tray and then destroyed. */
+function showMainWindow() {
+  startHidden = false;
+  if (!win || win.isDestroyed()) { createWindow(); return; }
+  if (win.isMinimized()) win.restore();
+  win.show(); win.focus();
+}
+const trayEnabled = () => settings.get().prefs.tray !== false;
+
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
+    { label: 'Open Tomail', click: showMainWindow },
+    { label: 'New message', click: () => openComposeWindow({ mode: 'new' }) },
+    { label: 'Check for mail now', click: () => syncAll().catch(() => {}) },
+    { type: 'separator' },
+    { label: 'Quit Tomail', click: () => { isQuitting = true; app.quit(); } },
+  ]);
+}
+/** Create, update or remove the tray icon to match the preference. Safe to call any time. */
+function applyTray() {
+  if (!trayEnabled()) { if (tray) { tray.destroy(); tray = null; } return; }
+  if (tray) return;
+  const size = process.platform === 'darwin' ? 18 : 22;
+  tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: size, height: size }));
+  tray.setToolTip('Tomail');
+  tray.setContextMenu(buildTrayMenu());
+  tray.on('click', () => {                      // Windows/Linux: a plain click toggles the window
+    if (process.platform === 'darwin') return;
+    if (win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) win.hide(); else showMainWindow();
+  });
+  tray.on('double-click', showMainWindow);
+}
+function setTrayUnread(count) {
+  if (!tray) return;
+  try { tray.setToolTip(count > 0 ? `Tomail — ${count} unread` : 'Tomail'); } catch {}
+}
+
+/** Start at login. Electron only implements this for macOS and Windows, so Linux gets an XDG autostart entry. */
+const AUTOSTART_FILE = () => path.join(os.homedir(), '.config', 'autostart', 'tomail.desktop');
+function autostartEnabled() {
+  try {
+    if (process.platform === 'linux') return fs.existsSync(AUTOSTART_FILE());
+    return app.getLoginItemSettings().openAtLogin;
+  } catch { return false; }
+}
+function setAutostart(on) {
+  try {
+    if (process.platform === 'linux') {
+      const file = AUTOSTART_FILE();
+      if (!on) { fs.rmSync(file, { force: true }); return; }
+      const exec = process.env.APPIMAGE || (app.isPackaged ? process.execPath : `${process.execPath} ${app.getAppPath()}`);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `[Desktop Entry]\nType=Application\nName=Tomail\nExec=${exec} --hidden\nIcon=tomail\nTerminal=false\nX-GNOME-Autostart-enabled=true\nComment=Start Tomail in the background so new mail still notifies you\n`);
+      return;
+    }
+    app.setLoginItemSettings({ openAtLogin: !!on, openAsHidden: true, args: ['--hidden'] });
+  } catch (e) { log('start at login:', e.message); }
+}
+
+/** A saved window rectangle is only reused if it still lands on a connected screen. */
+function usableBounds(b) {
+  if (!b || !Number.isFinite(b.width) || !Number.isFinite(b.height)) return null;
+  if (!Number.isFinite(b.x) || !Number.isFinite(b.y)) return { width: b.width, height: b.height };
+  const onScreen = screen.getAllDisplays().some(d => {
+    const w = d.workArea;
+    return b.x < w.x + w.width && b.x + b.width > w.x && b.y < w.y + w.height && b.y + b.height > w.y;
+  });
+  return onScreen ? b : { width: b.width, height: b.height };
+}
+/** Window moves/resizes fire per pixel — only write settings.json once the drag stops. */
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
 function createWindow() {
+  const saved = usableBounds(settings.get().prefs.mainBounds);
   win = new BrowserWindow({
-    width: 1280, height: 1015, minWidth: 900, minHeight: 600, title: `Tomail ${app.getVersion()}`, autoHideMenuBar: true, show: false, icon: ICON,
+    width: saved?.width || 1280, height: saved?.height || 1015, x: saved?.x, y: saved?.y,
+    minWidth: 900, minHeight: 600, title: `Tomail ${app.getVersion()}`, autoHideMenuBar: true, show: false, icon: ICON,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1f22' : '#f6f6f6',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: true },
   });
-  win.once('ready-to-show', () => win.show());
+  if (settings.get().prefs.mainMaximized) win.maximize();
+  win.once('ready-to-show', () => { if (startHidden) { startHidden = false; log('started hidden (start at login)'); } else win.show(); });
+  const rememberMain = debounce(() => {
+    if (!win || win.isDestroyed() || win.isMinimized()) return;
+    const patch = { mainMaximized: win.isMaximized() };
+    if (!win.isMaximized() && !win.isFullScreen()) patch.mainBounds = win.getBounds();
+    settings.set({ prefs: patch });
+  }, 400);
+  win.on('resize', rememberMain); win.on('move', rememberMain); win.on('maximize', rememberMain); win.on('unmaximize', rememberMain);
+  // Closing the window keeps Tomail running in the tray, so new mail still notifies you.
+  win.on('close', (e) => {
+    if (isQuitting || !tray || settings.get().prefs.closeToTray === false) return;
+    e.preventDefault();
+    win.hide();
+    if (!settings.get().prefs.trayHintShown) {
+      settings.set({ prefs: { trayHintShown: true } });
+      if (Notification.isSupported()) new Notification({ title: 'Tomail is still running', body: 'It sits in the tray so new mail can still reach you. Quit it from the tray icon, or turn this off in Settings → General.' }).show();
+    }
+  });
   win.webContents.on('context-menu', (_e, params) => {
     if (!params.isEditable) return;
     const items = params.dictionarySuggestions.map(s => ({ label: s, click: () => win.webContents.replaceMisspelling(s) }));
@@ -320,7 +419,7 @@ function registerIpc() {
   handle('followups:add', (accountId, messageId, dueAt) => actions.addFollowup(accountId, messageId, dueAt));
   handle('followups:update', (id, fields) => { const allowed = {}; if (fields.dueAt) { allowed.due_at = Number(fields.dueAt); allowed.status = 'waiting'; allowed.notified = 0; } if (fields.status) allowed.status = fields.status; db.updateFollowup(id, allowed); notifyChanged(); return db.getFollowup(id); });
   handle('followups:remove', (id) => { db.deleteFollowup(id); notifyChanged(); return true; });
-  handle('messages:senderInfo', (email) => db.senderInfo(email, db.listAccounts().map(a => a.email)));
+  handle('messages:senderInfo', (email) => db.senderInfo(email, db.listAccounts().flatMap(a => a.identities.map(i => i.email))));
   handle('outbox:sendNow', (id) => actions.sendOutboxItem(id));
   handle('outbox:remove', (id) => { db.removeOutbox(id); notifyChanged(); return true; });
   handle('labels:rename', (accountId, id, name) => actions.renameLabel(accountId, id, name));
@@ -346,10 +445,15 @@ function registerIpc() {
   handle('app:setBadge', (count, dataUrl) => {
     if (process.platform === 'win32') { if (win && !win.isDestroyed()) win.setOverlayIcon(count > 0 && dataUrl ? nativeImage.createFromDataURL(dataUrl) : null, count > 0 ? `${count} unread` : ''); }
     else app.setBadgeCount(count || 0);
+    setTrayUnread(count || 0);
     return true;
   });
   handle('settings:get', () => settings.get());
-  handle('settings:set', (patch) => { const s = settings.set(patch); scheduleSync(); applyTheme(); return s; });
+  handle('settings:set', (patch) => {
+    const s = settings.set(patch); scheduleSync(); applyTheme(); applyTray();
+    if (patch.prefs && 'startAtLogin' in patch.prefs) setAutostart(!!patch.prefs.startAtLogin);
+    return s;
+  });
 
   handle('accounts:list', () => db.listAccounts().map(a => ({ ...a, status: syncStatus[a.id] || null, canDeleteForever: (() => { try { return accounts.provider(a.id).canDeleteForever; } catch { return false; } })() })));
   handle('accounts:add', async (opts = {}) => {
@@ -372,6 +476,7 @@ function registerIpc() {
   handle('accounts:reorder', (ids) => { db.reorderAccounts(ids); notifyChanged(); return true; });
   handle('accounts:rename', (id, name) => { db.updateAccount(id, { display_name: name }); notifyChanged(); return true; });
   handle('accounts:setSignature', (id, sig) => { db.updateAccount(id, { signature: sig }); notifyChanged(); return true; });
+  handle('accounts:setAliases', (id, list) => { const ids = db.setAliases(id, list); notifyChanged(); return ids; });
   handle('accounts:resync', (id) => { accounts.forget(id); db.resetAccountSync(id); notifyChanged(); syncAll(id).catch(() => {}); return true; });
 
   handle('labels:list', (accountId) => db.listLabels(accountId));
@@ -463,13 +568,13 @@ function registerIpc() {
   // quick reply (from the reading pane or a notification)
   handle('messages:quickReply', async (accountId, id, text, all) => {
     const m = await actions.getMessage(accountId, id); if (!m) throw new Error('Message not found');
-    const me = new Set(db.listAccounts().map(a => a.email.toLowerCase()));
+    const me = new Set(db.listAccounts().flatMap(a => a.identities.map(i => i.email)));
     const to = m.replyTo || (m.fromName ? `"${m.fromName.replace(/"/g, '')}" <${m.fromEmail}>` : m.fromEmail);
     const others = all ? [...(m.to || []), ...(m.cc || [])].filter(a => !me.has(a.email)).map(a => a.name ? `"${a.name}" <${a.email}>` : a.email).join(', ') : '';
     const subj = /^re:/i.test(m.subject || '') ? m.subject : `Re: ${m.subject || ''}`;
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const quotedHtml = `<div>On ${new Date(m.date).toLocaleString('en-GB')}, ${esc(m.fromName || m.fromEmail)} wrote:</div><blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${m.bodyHtml || `<div style="white-space:pre-wrap">${esc(m.bodyText || '')}</div>`}</blockquote>`;
-    return actions.send({ accountId, to, cc: others, subject: subj, text, quotedHtml, quotedText: (m.bodyText || '').split('\n').map(l => '> ' + l).join('\n'), replyTo: { accountId, id }, mode: all ? 'replyAll' : 'reply' });
+    return actions.send({ accountId, from: replyIdentity(accountId, m), to, cc: others, subject: subj, text, quotedHtml, quotedText: (m.bodyText || '').split('\n').map(l => '> ' + l).join('\n'), replyTo: { accountId, id }, mode: all ? 'replyAll' : 'reply' });
   });
   // export
   handle('export:mbox', async (accountId) => {
@@ -537,10 +642,13 @@ app.whenReady().then(async () => {
   if (DEMO) { seedDemo(db); const dp = new DemoProvider(db); accounts.provider = () => dp; }
   actions = new Actions({ db, providers: (id) => accounts.provider(id), onChange: notifyChanged, log });
   registerIpc();
+  applyTray();
+  const wantAutostart = !!settings.get().prefs.startAtLogin;
+  if (wantAutostart !== autostartEnabled()) setAutostart(wantAutostart);   // the OS entry can be removed behind our back
   createWindow();
   syncAll().catch(() => {});
   scheduleSync();
-  setInterval(() => { try { for (const f of actions.checkFollowups()) { if (!f.notified && Notification.isSupported() && settings.get().prefs.notifications !== false) { const n = new Notification({ title: 'No reply yet: ' + (f.subject || '(no subject)'), body: `Sent to ${f.to} on ${new Date(f.createdAt).toLocaleDateString('en-GB')} — follow up?` }); n.on('click', () => { if (win) { win.show(); win.focus(); send('app:open-followups', {}); } }); n.show(); actions.markFollowupNotified(f.id); } } } catch (e) { log('followups:', e.message); } }, 5 * 60000);
+  setInterval(() => { try { for (const f of actions.checkFollowups()) { if (!f.notified && Notification.isSupported() && settings.get().prefs.notifications !== false) { const n = new Notification({ title: 'No reply yet: ' + (f.subject || '(no subject)'), body: `Sent to ${f.to} on ${new Date(f.createdAt).toLocaleDateString('en-GB')} — follow up?` }); n.on('click', () => { showMainWindow(); send('app:open-followups', {}); }); n.show(); actions.markFollowupNotified(f.id); } } } catch (e) { log('followups:', e.message); } }, 5 * 60000);
   setInterval(() => actions.processScheduled().then(n => { if (n) log(`scheduled: sent ${n}`); }).catch(e => log('scheduled:', e.message)), 30000);
   setInterval(checkAchievements, 60000); setTimeout(checkAchievements, 20000);
   outboxTimer = setInterval(() => actions.processOutbox().then(n => { if (n) log(`outbox: sent ${n}`); }).catch(e => log('outbox:', e.message)), 60000);
@@ -558,6 +666,13 @@ app.whenReady().then(async () => {
   }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
-ipcMain.on('quick-reply', (_e, accountId, id, text) => { actions.getMessage(accountId, id).then(async (m) => { if (!m) return; const to = m.replyTo || m.fromEmail; const subj = /^re:/i.test(m.subject || '') ? m.subject : `Re: ${m.subject || ''}`; await actions.send({ accountId, to, subject: subj, text, replyTo: { accountId, id }, mode: 'reply' }); }).catch(e => log('notification reply:', e.message)); });
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { clearInterval(syncTimer); clearInterval(snoozeTimer); clearInterval(outboxTimer); clearTimeout(housekeepTimer); for (const a of db?.listAccounts?.() || []) { try { accounts.providers.get(a.id)?.cancel(); } catch {} } try { db?.close(); } catch {} });
+/** Which of the account's addresses a reply should come from: the one the message was sent to. */
+function replyIdentity(accountId, m) {
+  const ids = db.identities(accountId);
+  const addressed = [...(m.to || []), ...(m.cc || [])].map(a => String(a.email || '').toLowerCase());
+  return ids.find(i => addressed.includes(i.email))?.email || undefined;
+}
+ipcMain.on('quick-reply', (_e, accountId, id, text) => { actions.getMessage(accountId, id).then(async (m) => { if (!m) return; const to = m.replyTo || m.fromEmail; const subj = /^re:/i.test(m.subject || '') ? m.subject : `Re: ${m.subject || ''}`; await actions.send({ accountId, from: replyIdentity(accountId, m), to, subject: subj, text, replyTo: { accountId, id }, mode: 'reply' }); }).catch(e => log('notification reply:', e.message)); });
+// With a tray icon Tomail keeps running with no windows open, so the last window closing is not a quit.
+app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !tray) app.quit(); });
+app.on('before-quit', () => { isQuitting = true; clearInterval(syncTimer); clearInterval(snoozeTimer); clearInterval(outboxTimer); clearTimeout(housekeepTimer); for (const a of db?.listAccounts?.() || []) { try { accounts.providers.get(a.id)?.cancel(); } catch {} } try { db?.close(); } catch {} });

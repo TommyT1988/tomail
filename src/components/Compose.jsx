@@ -11,8 +11,19 @@ import { useAiStream } from '../useAi.js';
 /** draft: { mode:'new'|'reply'|'replyAll'|'forward', accountId, original?, draftId?, to?, subject? } */
 export default function Compose({ draft, accounts, prefs, onClose, toast, standalone = false }) {
   const orig = draft.original;
-  const me = new Set(accounts.map(a => a.email.toLowerCase()));
+  // Every address we can send as, across every account. `me` drives reply-all (never write to yourself).
+  const identities = accounts.flatMap(a => (a.identities?.length ? a.identities : [{ email: a.email, name: a.display_name && a.display_name !== a.email ? a.display_name : '' }])
+    .map(i => ({ ...i, accountId: a.id, account: a })));
+  const me = new Set(identities.map(i => i.email.toLowerCase()));
   const initAcct = accounts.find(a => a.id === draft.accountId) || accounts[0];
+  // Reply from the address they wrote to: an alias keeps the conversation on that identity.
+  const addressedTo = () => {
+    if (!orig) return null;
+    const hit = [...(orig.to || []), ...(orig.cc || [])].map(x => String(x.email || '').toLowerCase())
+      .concat(String(orig.deliveredTo || '').toLowerCase())
+      .find(e => identities.some(i => i.accountId === (draft.accountId ?? initAcct?.id) && i.email === e));
+    return hit || null;
+  };
   const sigFor = (a) => (a?.signature ?? prefs?.signature ?? '').trim();
   const sigHtml = (a) => { const s = sigFor(a); return s ? `<br><br><div class="sig">${s.startsWith('<') ? s : escapeHtml(s).replace(/\n/g, '<br>')}</div>` : ''; };
   const init = () => {
@@ -28,6 +39,7 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
   };
   const [f, setF] = useState(init);
   const [accountId, setAccountId] = useState(initAcct?.id);
+  const [from, setFrom] = useState(() => addressedTo() || initAcct?.email || '');
   const [draftId, setDraftId] = useState(draft.draftId || null);
   const [loaded, setLoaded] = useState(!draft.draftId);
   const [sending, setSending] = useState(false);
@@ -47,12 +59,12 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
   const sendLater = async (at) => {
     if (!f.to.trim()) { toast('Add at least one recipient', true); return; }
     setSending(true); clearTimeout(saveTimer.current);
-    try { const { html, attachments } = extractInlineImages(f.html); await window.mail.scheduled.add({ accountId, to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, html, text: htmlToText(html), quotedHtml: f.quotedHtml, quotedText: f.quotedText, attachments: [...f.attachments, ...attachments], replyTo: orig ? { accountId: orig.accountId, id: orig.id } : draft.replyTo, mode: draft.mode, forwardAttachments: draft.mode === 'forward' && f.includeOrigAtts, followUpAt }, at); if (latest.current.draftId) await window.mail.drafts.remove(latest.current.draftId).catch(() => {}); toast('Scheduled'); onClose(); }
+    try { const { html, attachments } = extractInlineImages(f.html); await window.mail.scheduled.add({ accountId, from, to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, html, text: htmlToText(html), quotedHtml: f.quotedHtml, quotedText: f.quotedText, attachments: [...f.attachments, ...attachments], replyTo: orig ? { accountId: orig.accountId, id: orig.id } : draft.replyTo, mode: draft.mode, forwardAttachments: draft.mode === 'forward' && f.includeOrigAtts, followUpAt }, at); if (latest.current.draftId) await window.mail.drafts.remove(latest.current.draftId).catch(() => {}); toast('Scheduled'); onClose(); }
     catch (e) { toast(e.message, true); } finally { setSending(false); }
   };
   const dirty = useRef(false);
   const saveTimer = useRef(null);
-  const latest = useRef({ f, accountId, draftId }); latest.current = { f, accountId, draftId };
+  const latest = useRef({ f, accountId, draftId, from }); latest.current = { f, accountId, draftId, from };
   const set = (k) => (e) => { setF(x => ({ ...x, [k]: e.target.value })); dirty.current = true; scheduleSave(); };
 
   useEffect(() => {
@@ -60,11 +72,11 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
     window.mail.drafts.get(draft.draftId).then(d => {
       if (!d) { setLoaded(true); return; }
       setF({ to: d.to, cc: d.cc, bcc: d.bcc, subject: d.subject, html: d.bodyHtml, attachments: d.attachments || [], includeOrigAtts: d.includeOrigAtts, quotedHtml: d.quotedHtml || '', quotedText: d.quotedText || '' });
-      setAccountId(d.accountId); setShowCc(!!(d.cc || d.bcc)); setLoaded(true);
+      setAccountId(d.accountId); setFrom(d.from || accounts.find(a => a.id === d.accountId)?.email || ''); setShowCc(!!(d.cc || d.bcc)); setLoaded(true);
     }).catch(e => { toast(e.message, true); setLoaded(true); });
   }, [draft.draftId]); // eslint-disable-line
 
-  const payload = () => { const { f, accountId, draftId } = latest.current; return { id: draftId || undefined, accountId, mode: draft.mode, replyTo: orig ? { accountId: orig.accountId, id: orig.id } : (draft.replyTo || null),
+  const payload = () => { const { f, accountId, draftId, from } = latest.current; return { id: draftId || undefined, accountId, from, mode: draft.mode, replyTo: orig ? { accountId: orig.accountId, id: orig.id } : (draft.replyTo || null),
     to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, bodyHtml: f.html, bodyText: htmlToText(f.html), attachments: f.attachments, quotedHtml: f.quotedHtml, quotedText: f.quotedText, includeOrigAtts: f.includeOrigAtts }; };
   const isEmpty = () => { const { f } = latest.current; return !f.to && !f.cc && !f.bcc && !f.subject && !htmlToText(f.html).replace(sigFor(accounts.find(a => a.id === latest.current.accountId)), '').trim() && !f.attachments.length; };
   const save = useCallback(async () => {
@@ -87,7 +99,7 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
     setSending(true); clearTimeout(saveTimer.current);
     try {
       const { html, attachments } = extractInlineImages(f.html);
-      const payload = { accountId, to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, html, text: htmlToText(html), quotedHtml: f.quotedHtml, quotedText: f.quotedText,
+      const payload = { accountId, from, to: f.to, cc: f.cc, bcc: f.bcc, subject: f.subject, html, text: htmlToText(html), quotedHtml: f.quotedHtml, quotedText: f.quotedText,
         attachments: [...f.attachments, ...attachments], replyTo: orig ? { accountId: orig.accountId, id: orig.id } : draft.replyTo, mode: draft.mode, forwardAttachments: draft.mode === 'forward' && f.includeOrigAtts, draftId, followUpAt };
       if (standalone && (prefs?.sendDelaySec ?? 5) > 0) {
         // keep the draft so Undo in the main window can reopen it; the main process sends after the delay
@@ -140,7 +152,13 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
         </div>
         <div className="mb">
           <div className="field"><label>From</label>
-            {accounts.length > 1 ? <select value={accountId} onChange={e => { const id = Number(e.target.value); const old = sigHtml(acct), nu = sigHtml(accounts.find(a => a.id === id)); setAccountId(id); setF(x => ({ ...x, html: old && x.html.endsWith(old) ? x.html.slice(0, -old.length) + nu : x.html })); dirty.current = true; scheduleSave(); }}>{accounts.map(a => <option key={a.id} value={a.id}>{a.display_name && a.display_name !== a.email ? `${a.display_name} <${a.email}>` : a.email}</option>)}</select>
+            {identities.length > 1 ? <select value={`${accountId}|${from}`} onChange={e => {
+              const [id, addr] = e.target.value.split('|'); const nid = Number(id);
+              const old = sigHtml(acct), nu = sigHtml(accounts.find(a => a.id === nid));
+              setAccountId(nid); setFrom(addr);
+              setF(x => ({ ...x, html: old && x.html.endsWith(old) ? x.html.slice(0, -old.length) + nu : x.html }));
+              dirty.current = true; scheduleSave();
+            }}>{identities.map(i => <option key={`${i.accountId}|${i.email}`} value={`${i.accountId}|${i.email}`}>{i.name ? `${i.name} <${i.email}>` : i.email}{i.alias ? ' (alias)' : ''}</option>)}</select>
               : <span>{acct?.email}</span>}
           </div>
           <div className="field"><label>To</label><div style={{ display: 'flex', gap: 6 }}><AddressInput value={f.to} onChange={v => set('to')({ target: { value: v } })} placeholder="name@example.com, …" autoFocus={draft.mode === 'new' || draft.mode === 'forward'} />

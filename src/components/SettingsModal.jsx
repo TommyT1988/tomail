@@ -2,6 +2,14 @@ import React, { useEffect, useState } from 'react';
 import Icon from './Icons.jsx';
 import RulesTab from './RulesTab.jsx';
 
+/** "Sales <sales@x.com>" or a bare address, one per line. */
+function parseAliases(text) {
+  return String(text || '').split(/[\n,;]+/).map(line => {
+    const t = line.trim(); if (!t) return null;
+    const m = /^"?([^"<]*?)"?\s*<([^>]+)>$/.exec(t);
+    return m ? { name: m[1].trim(), email: m[2].trim() } : { name: '', email: t };
+  }).filter(Boolean);
+}
 function ImapForm({ onDone, toast }) {
   const [email, setEmail] = useState('');
   const [cfg, setCfg] = useState(null);
@@ -50,6 +58,7 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
   const [busy, setBusy] = useState(false);
   const [showImap, setShowImap] = useState(false);
   const [sigEdit, setSigEdit] = useState(null);
+  const [aliasEdit, setAliasEdit] = useState(null);
   const [dbInfo, setDbInfo] = useState(null);
   const [contacts, setContacts] = useState(null);
   const [snips, setSnips] = useState([]); const [snipEdit, setSnipEdit] = useState(null);
@@ -94,6 +103,9 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
             <div className="frow"><label></label><small>IMAP accounts are also pushed to instantly by the server (IMAP IDLE).</small></div>
             <div className="frow"><label>Notifications</label><label><input type="checkbox" checked={s.prefs.notifications !== false} onChange={e => pref('notifications', e.target.checked)} /> <Icon name="bell" size={12} /> show a system notification for new inbox mail</label></div>
             <div className="frow"><label></label><label><input type="checkbox" checked={s.prefs.notifyWhenFocused !== false} onChange={e => pref('notifyWhenFocused', e.target.checked)} /> even while Tomail is the active window</label></div>
+            <div className="frow"><label>Keep running</label><label title="Tomail sits in the system tray so new mail still reaches you"><input type="checkbox" checked={s.prefs.tray !== false} onChange={e => { pref('tray', e.target.checked); window.mail.settings.set({ prefs: { tray: e.target.checked } }); }} /> show a tray icon</label></div>
+            <div className="frow"><label></label><label style={{ opacity: s.prefs.tray === false ? 0.5 : 1 }}><input type="checkbox" disabled={s.prefs.tray === false} checked={s.prefs.closeToTray !== false} onChange={e => { pref('closeToTray', e.target.checked); window.mail.settings.set({ prefs: { closeToTray: e.target.checked } }); }} /> closing the window leaves Tomail in the tray instead of quitting</label></div>
+            <div className="frow"><label></label><label><input type="checkbox" checked={!!s.prefs.startAtLogin} onChange={e => { pref('startAtLogin', e.target.checked); window.mail.settings.set({ prefs: { startAtLogin: e.target.checked } }); }} /> start Tomail when I log in (hidden, in the tray)</label></div>
             <div className="frow"><label>Conversation view</label><label><input type="checkbox" checked={!!s.prefs.threaded} onChange={e => pref('threaded', e.target.checked)} /> group messages by conversation by default</label></div>
             <div className="frow"><label>Mark as read after</label><div><input type="number" min="0" style={{ width: 80 }} value={s.prefs.markReadDelayMs} onChange={e => pref('markReadDelayMs', Number(e.target.value))} /> ms in the reading pane (0 = immediately)</div></div>
             <div className="frow"><label>Remote images</label><label><input type="checkbox" checked={!!s.prefs.loadRemoteImages} onChange={e => pref('loadRemoteImages', e.target.checked)} /> always load images in messages (tracking pixels will fire)</label></div>
@@ -118,12 +130,19 @@ export default function SettingsModal({ onClose, accounts, refreshAccounts, toas
                 <button title="Move up" disabled={i === 0} onClick={async () => { const ids = accounts.map(x => x.id); ids.splice(i, 1); ids.splice(i - 1, 0, a.id); await window.mail.accounts.reorder(ids); refreshAccounts(); }}>▲</button>
                 <button title="Move down" disabled={i === accounts.length - 1} onClick={async () => { const ids = accounts.map(x => x.id); ids.splice(i, 1); ids.splice(i + 1, 0, a.id); await window.mail.accounts.reorder(ids); refreshAccounts(); }}>▼</button>
                 <button onClick={() => setSigEdit(sigEdit === a.id ? null : a.id)}>Signature</button>
+                <button title="Other addresses you can send from on this account" onClick={() => setAliasEdit(aliasEdit === a.id ? null : a.id)}>Aliases{a.aliases?.length ? ` (${a.aliases.length})` : ''}</button>
                 <button onClick={async () => { const n = prompt('Display name (used in From):', a.display_name || ''); if (n != null) { await window.mail.accounts.rename(a.id, n); refreshAccounts(); } }}>Rename</button>
                 {a.kind !== 'imap' && <button title={contacts?.accounts?.[a.id]?.granted ? `Contacts imported ${contacts.accounts[a.id].importedAt ? new Date(contacts.accounts[a.id].importedAt).toLocaleString('en-GB') : 'never'} — refreshes daily` : 'Import your Google address book for To/Cc suggestions (asks Google for read-only contacts access)'} onClick={() => importContacts(a)} disabled={importing === a.id}>{importing === a.id ? 'Importing…' : contacts?.accounts?.[a.id]?.granted ? 'Refresh contacts' : 'Import Google Contacts'}</button>}
                 {a.kind !== 'imap' && !a.canDeleteForever && <button title="Re-sign-in granting full Gmail access so Tomail can empty Trash / delete permanently" onClick={() => addGoogle(true)} disabled={busy}>Grant full access</button>}
                 <button onClick={async () => { if (confirm(`Re-download the whole mailbox for ${a.email}? Cached bodies are dropped.`)) { await window.mail.accounts.resync(a.id); refreshAccounts(); } }}>Resync</button>
                 <button onClick={async () => { if (confirm(`Remove ${a.email} from this PC? (Nothing is deleted on the server.)`)) { await window.mail.accounts.remove(a.id); refreshAccounts(); } }}>Remove</button>
                 {sigEdit === a.id && <div style={{ width: '100%', marginTop: 6 }}><textarea rows={3} style={{ width: '100%' }} defaultValue={a.signature || ''} placeholder="Signature for this account (blank = default signature)" onBlur={async e => { await window.mail.accounts.setSignature(a.id, e.target.value); refreshAccounts(); toast('Signature saved'); }} /></div>}
+                {aliasEdit === a.id && <div style={{ width: '100%', marginTop: 6 }}>
+                  <textarea rows={3} style={{ width: '100%' }} defaultValue={(a.aliases || []).map(x => x.name ? `${x.name} <${x.email}>` : x.email).join('\n')}
+                    placeholder={'One address per line, e.g.\nSales <sales@example.com>\nbilling@example.com'}
+                    onBlur={async e => { try { await window.mail.accounts.setAliases(a.id, parseAliases(e.target.value)); refreshAccounts(); toast('Aliases saved'); } catch (err) { toast(err.message, true); } }} />
+                  <small className="muted">They appear in the From menu when you write. The address must already be set up with your provider ({a.kind === 'imap' ? 'your server has to let you send as it' : 'Gmail → Settings → Accounts → Send mail as'}), or the message goes out as {a.email}.</small>
+                </div>}
               </div>
             ))}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '12px 0' }}>
