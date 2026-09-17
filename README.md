@@ -173,7 +173,7 @@ test/                     node:test suite (db, mime, batch parsing, sync, action
 
 | Version | Highlights |
 |---|---|
-| 0.9 | Tray icon with start-at-login, remembered window position, send-as aliases, oldest-first that opens on today, a settings dialog that stays put, new mail during a first sync, and a large mailbox that stops stalling — folders, counts and clicks all measured on 200,000 messages |
+| 0.9 | Tray icon with start-at-login, remembered window position, send-as aliases, oldest-first that opens on today, a settings dialog that stays put, new mail during a first sync, read-ahead so clicks are instant, and a large mailbox that stops stalling — folders, counts, conversations and clicks all measured on 200,000 messages |
 | 0.8 | Local AI via Ollama: summaries, suggested replies, drafting in your tone, rewriting, rules from a sentence |
 | 0.7 | Send later, snippets, quick reply, tabs, phishing warnings, app lock, mbox export, clean links, achievements |
 | 0.6 | Follow-up reminders, sender card with SPF/DKIM/DMARC |
