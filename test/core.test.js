@@ -653,3 +653,27 @@ test('editing the quoted original sends exactly what leaving it alone would', as
   assert.match(edited, /tomail_quote/);
   assert.match(edited, /Is it available\?/);
 });
+
+test('proton: bridge settings, and the self-signed exception is loopback only', async () => {
+  const { autoconfig, isLoopback, tlsFor } = require('../electron/providers/imap');
+
+  for (const addr of ['me@proton.me', 'me@protonmail.com', 'me@pm.me', 'me@protonmail.ch']) {
+    const c = await autoconfig(addr);
+    assert.equal(c.host, '127.0.0.1', `${addr} points at Bridge, not at a Proton server`);
+    assert.equal(c.port, 1143);
+    assert.equal(c.secure, false, 'Bridge speaks STARTTLS on 1143');
+    assert.equal(c.smtpHost, '127.0.0.1');
+    assert.equal(c.smtpPort, 1025);
+    assert.match(c.note, /Bridge/, 'and says what to install');
+  }
+
+  // Bridge serves a self-signed certificate; only a connection that never leaves the machine may accept one.
+  for (const h of ['127.0.0.1', '127.1.2.3', 'localhost', '::1', '[::1]']) {
+    assert.equal(isLoopback(h), true, h);
+    assert.equal(tlsFor(h).tls.rejectUnauthorized, false, h);
+  }
+  for (const h of ['imap.gmail.com', 'mail.proton.me', '127.0.0.1.evil.com', 'notlocalhost', 'localtest.me', '', null, '10.0.0.1']) {
+    assert.equal(isLoopback(h), false, String(h));
+    assert.equal(tlsFor(h).tls, undefined, `${h} must still be verified`);
+  }
+});

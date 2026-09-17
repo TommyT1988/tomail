@@ -1,6 +1,6 @@
 <p align="center"><img src="build/icon-256.png" width="96" alt="Tomail"></p>
 <h1 align="center">Tomail</h1>
-<p align="center">A fast, keyboard-friendly desktop email client for Gmail, Google Workspace and any IMAP mailbox.<br>Windows · macOS · Linux · optional local AI</p>
+<p align="center">A fast, keyboard-friendly desktop email client for Gmail, Google Workspace, Proton Mail and any IMAP mailbox.<br>Windows · macOS · Linux · optional local AI</p>
 
 <p align="center"><img src="docs/screenshots/inbox-4.png" width="800" alt="Tomail inbox"></p>
 
@@ -29,6 +29,8 @@ Installers aren't code-signed yet, so the first launch shows a warning: on Windo
 Click **Sign in with Google** and sign in through your browser. Tomail asks only for `gmail.modify` (read, label, archive, trash, send) and never for permanent delete unless you grant it separately later. Your password never passes through the app. Sign-in tokens are stored in Tomail's local database, encrypted with a key held by your operating system's keychain (Windows DPAPI, macOS Keychain, GNOME Keyring / KWallet on Linux); on a Linux system without a keyring service they're stored unencrypted, and Settings says which applies.
 
 For any other provider, **Settings → Accounts → Add other account (IMAP)**: type the address, and Tomail looks up the server settings (built-in list of major providers plus Mozilla's provider database). Yahoo, iCloud, Fastmail and Gmail-over-IMAP need an app password. Outlook.com and Microsoft 365 have mostly retired password sign-in for IMAP, so they need an app password where the tenant allows it; Microsoft OAuth is on the roadmap.
+
+**Proton Mail** works through [Proton Mail Bridge](https://proton.me/mail/bridge), Proton's own app that decrypts your mail locally and serves it over IMAP on `127.0.0.1`. Bridge comes with a paid Proton plan. Install it, sign in, and type your Proton address into Tomail's IMAP form: it fills in Bridge's ports for you, and you paste the username and password **Bridge generates**, not your Proton password. Bridge has to be running for mail to sync. Bridge presents a self-signed certificate, which Tomail accepts for connections to your own machine only — anything with a real hostname is verified as strictly as ever.
 
 > **Google verification status.** Tomail's Google app is currently in *Testing* mode: only addresses on the tester list can sign in, and Google expires those sign-ins every 7 days (Tomail shows a "Sign in again" button). Lifting that requires Google's verification review. IMAP accounts have no such limit.
 

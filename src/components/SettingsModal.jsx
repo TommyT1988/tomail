@@ -46,7 +46,7 @@ function ImapForm({ onDone, toast }) {
       <div className="frow"><label>Email address</label><div style={{ display: 'flex', gap: 6 }}><input type="email" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && lookup()} placeholder="you@example.com" autoFocus /><button onClick={lookup} disabled={busy === 'lookup'}>{busy === 'lookup' ? 'Looking up…' : 'Next'}</button></div></div>
       {cfg && <>
         {cfg.note && <p className="muted" style={{ marginLeft: 198 }}>{cfg.note}</p>}
-        <div className="frow"><label>Password</label><input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder={/app password/i.test(cfg.note || '') ? 'App password' : 'Mailbox password'} /></div>
+        <div className="frow"><label>Password</label><input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder={/Bridge/.test(cfg.note || '') ? 'Password from Proton Mail Bridge' : /app password/i.test(cfg.note || '') ? 'App password' : 'Mailbox password'} /></div>
         <div className="frow"><label>Your name</label><input type="text" value={cfg.displayName || ''} onChange={set('displayName')} placeholder="Shown on messages you send" /></div>
         <div className="frow"><label></label><small>Found via {cfg.source === 'autoconfig' ? "Mozilla's provider database" : cfg.source === 'preset' ? 'built-in provider list' : 'a guess from the domain'}: {cfg.host} · {cfg.smtpHost} <button className="ccbcc" onClick={() => setAdvanced(a => !a)}>{advanced ? 'hide' : 'edit'} server settings</button></small></div>
         {advanced && <>

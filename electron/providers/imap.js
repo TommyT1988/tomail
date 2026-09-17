@@ -13,6 +13,15 @@ const SPECIAL = { '\\Inbox': 'INBOX', '\\Sent': 'SENT', '\\Trash': 'TRASH', '\\J
 const NAME_GUESS = [[/^inbox$/i, 'INBOX'], [/^(sent|sent items|sent mail|sent messages)$/i, 'SENT'], [/^(trash|deleted|deleted items|deleted messages|bin)$/i, 'TRASH'],
   [/^(junk|spam|junk e-?mail|bulk mail)$/i, 'SPAM'], [/^drafts?$/i, 'DRAFT'], [/^(archive|archives|all mail)$/i, 'ARCHIVE']];
 const FOLDER_LABELS = new Set(['INBOX', 'SENT', 'TRASH', 'SPAM', 'DRAFT', 'ARCHIVE', 'ALLMAIL']);
+/**
+ * Local bridges (Proton Mail Bridge, Mailpiece, some antivirus mail proxies) serve a self-signed
+ * certificate, which Node rejects outright. Accept it for LOOPBACK ONLY — a connection that never
+ * leaves the machine can't be intercepted on the way, and this is how every mail client talks to
+ * Proton Bridge. Anything with a real hostname is verified as strictly as before.
+ */
+const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|\[?::1\]?)$/i;
+const isLoopback = (host) => LOOPBACK.test(String(host || '').trim());
+const tlsFor = (host) => (isLoopback(host) ? { tls: { rejectUnauthorized: false } } : {});
 const FLAG_LABELS = new Set(['UNREAD', 'STARRED']);
 const CHUNK = 250;
 const SNOOZE_KW = /^\$TomailUntil(\d{10,13})$/;
@@ -37,7 +46,7 @@ class ImapProvider {
     if (this.connecting) return this.connecting;
     this.connecting = (async () => {
       const c = new ImapFlow({ host: this.cfg.host, port: this.cfg.port || (this.cfg.secure === false ? 143 : 993), secure: this.cfg.secure !== false,
-        auth: { user: this.cfg.user, pass: this.cfg.pass }, logger: false, clientInfo: { name: 'Tomail' }, socketTimeout: 120000 });
+        auth: { user: this.cfg.user, pass: this.cfg.pass }, logger: false, clientInfo: { name: 'Tomail' }, socketTimeout: 120000, ...tlsFor(this.cfg.host) });
       c.on('error', (e) => this.log(`imap error (${this.accountId}): ${e.message}`));
       c.on('close', () => { if (this.client === c) this.client = null; });
       c.on('exists', () => { if (this.onPush && !this.running) this.onPush(); });
@@ -50,14 +59,14 @@ class ImapProvider {
   }
   async close() { try { await this.client?.logout(); } catch {} this.client = null; }
   static async test(cfg) {
-    const c = new ImapFlow({ host: cfg.host, port: cfg.port, secure: cfg.secure !== false, auth: { user: cfg.user, pass: cfg.pass }, logger: false, connectionTimeout: 15000 });
+    const c = new ImapFlow({ host: cfg.host, port: cfg.port, secure: cfg.secure !== false, auth: { user: cfg.user, pass: cfg.pass }, logger: false, connectionTimeout: 15000, ...tlsFor(cfg.host) });
     await c.connect(); const caps = [...(c.capabilities?.keys?.() || [])]; await c.logout();
     if (cfg.smtpHost) { const t = ImapProvider.transport(cfg); await t.verify(); }
     return { ok: true, capabilities: caps };
   }
   static transport(cfg) {
     const port = cfg.smtpPort || 587;
-    return nodemailer.createTransport({ host: cfg.smtpHost, port, secure: cfg.smtpSecure ?? port === 465, auth: { user: cfg.smtpUser || cfg.user, pass: cfg.smtpPass || cfg.pass }, connectionTimeout: 20000 });
+    return nodemailer.createTransport({ host: cfg.smtpHost, port, secure: cfg.smtpSecure ?? port === 465, auth: { user: cfg.smtpUser || cfg.user, pass: cfg.smtpPass || cfg.pass }, connectionTimeout: 20000, ...tlsFor(cfg.smtpHost) });
   }
 
   // ── folders ──
@@ -411,8 +420,13 @@ async function autoconfig(email) {
     'aol.com': { host: 'imap.aol.com', smtpHost: 'smtp.aol.com', note: 'Generate an app password in AOL Account Security.' },
     'fastmail.com': { host: 'imap.fastmail.com', smtpHost: 'smtp.fastmail.com', note: 'Use an app password from Fastmail settings.' },
     'zoho.com': { host: 'imap.zoho.com', smtpHost: 'smtp.zoho.com' }, 'gmx.com': { host: 'imap.gmx.com', smtpHost: 'mail.gmx.com' }, 'gmx.de': { host: 'imap.gmx.net', smtpHost: 'mail.gmx.net' },
-    'yandex.com': { host: 'imap.yandex.com', smtpHost: 'smtp.yandex.com' }, 'protonmail.com': { note: 'Proton requires the Proton Mail Bridge app (IMAP on 127.0.0.1:1143).', host: '127.0.0.1', port: 1143, secure: false, smtpHost: '127.0.0.1', smtpPort: 1025, smtpSecure: false },
+    'yandex.com': { host: 'imap.yandex.com', smtpHost: 'smtp.yandex.com' },
   };
+  // Proton has no public IMAP: mail goes through Proton Mail Bridge, a local app that decrypts and
+  // serves it on 127.0.0.1. Bridge needs a paid Proton plan and must be running.
+  const PROTON = { host: '127.0.0.1', port: 1143, secure: false, smtpHost: '127.0.0.1', smtpPort: 1025, smtpSecure: false,
+    note: 'Proton needs the Proton Mail Bridge app running on this computer (a paid Proton plan includes it). Open Bridge, copy the username and the password it generates for this address — not your Proton password — and paste them below. Bridge has to be running for mail to sync.' };
+  for (const d of ['protonmail.com', 'protonmail.ch', 'proton.me', 'pm.me']) presets[d] = { ...PROTON };
   const base = { user: email, port: 993, secure: true, smtpPort: 587, smtpSecure: false, source: 'preset' };
   if (presets[domain]) return { ...base, ...presets[domain] };
   try {
@@ -433,4 +447,4 @@ async function autoconfig(email) {
   return { ...base, host: `imap.${domain}`, smtpHost: `smtp.${domain}`, source: 'guess', note: 'Guessed from the domain — check with your provider if sign-in fails.' };
 }
 
-module.exports = { ImapProvider, autoconfig, mkId, splitId, normaliseImap, flagsToLabels, FOLDER_LABELS };
+module.exports = { ImapProvider, autoconfig, mkId, splitId, normaliseImap, flagsToLabels, FOLDER_LABELS, isLoopback, tlsFor };
