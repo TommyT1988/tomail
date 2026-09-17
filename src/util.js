@@ -1,6 +1,6 @@
 export const SYSTEM_FOLDERS = [
-  { id: 'INBOX', name: 'Inbox', icon: 'inbox' }, { id: 'SENT', name: 'Sent', icon: 'send' }, { id: 'TRASH', name: 'Trash', icon: 'trash' },
-  { id: 'DRAFT', name: 'Drafts', icon: 'edit' }, { id: 'SPAM', name: 'Junk Email', icon: 'slash' }, { id: 'ALL', name: 'All Mail', icon: 'layers' },
+  { id: 'INBOX', name: 'Inbox', icon: 'inbox', tint: '#2f6fcb' }, { id: 'SENT', name: 'Sent', icon: 'send', tint: '#1f7a33' }, { id: 'TRASH', name: 'Trash', icon: 'trash', tint: '#8a8a8a' },
+  { id: 'DRAFT', name: 'Drafts', icon: 'edit', tint: '#7b5bbd' }, { id: 'SPAM', name: 'Junk Email', icon: 'slash', tint: '#c0392b' }, { id: 'ALL', name: 'All Mail', icon: 'layers', tint: '#6b6b6b' },
 ];
 export const CATEGORIES = [
   { id: 'primary', name: 'Primary' }, { id: 'CATEGORY_PROMOTIONS', name: 'Promotions' }, { id: 'CATEGORY_SOCIAL', name: 'Social' },

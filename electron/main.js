@@ -63,6 +63,7 @@ let composeSeq = 0;
 const syncStatus = {};
 let lastCheckedAt = null;
 let syncTimer, snoozeTimer, changeTimer, outboxTimer, housekeepTimer, prefetchTimer;
+let updateChecker = null;   // set once the updater is live (packaged builds only)
 const pendingSends = new Map();  // id → { timer, payload, subject }
 let sendSeq = 0;
 const messageWins = new Map();
@@ -483,6 +484,11 @@ function applyTheme() { nativeTheme.themeSource = settings.get().prefs.theme || 
 function registerIpc() {
   handle('app:info', () => ({ version: app.getVersion(), demo: DEMO, userData: app.getPath('userData'), encrypted: safeStorage.isEncryptionAvailable(), hasGoogleClient: accounts.hasClient(), packaged: app.isPackaged, platform: process.platform, logFile: log.file }));
   handle('app:openLogs', () => { shell.showItemInFolder(log.file); return true; });
+  handle('app:checkForUpdates', async () => {
+    if (!updateChecker) return { version: app.getVersion(), unsupported: true };
+    try { return await updateChecker(); }
+    catch (e) { return { version: app.getVersion(), error: e.message }; }
+  });
   handle('app:reportProblem', (description) => {
     const redact = (s) => String(s).replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '<email>');
     const body = `**What happened**\n${description || ''}\n\n**Environment**\nTomail ${app.getVersion()} · ${process.platform} ${process.arch} · Electron ${process.versions.electron}\nAccounts: ${db.listAccounts().map(a => a.kind).join(', ') || 'none'}\n\n**Recent log** (addresses redacted)\n\`\`\`\n${redact(log.tail(60))}\n\`\`\``;
@@ -744,6 +750,11 @@ app.whenReady().then(async () => {
       autoUpdater.checkForUpdatesAndNotify().catch(e => log('update check:', e.message));
       setInterval(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 6 * 3600 * 1000);
       ipcMain.handle('app:installUpdate', () => { autoUpdater.quitAndInstall(); return true; });
+      updateChecker = async () => {
+        const r = await autoUpdater.checkForUpdates();
+        const latest = r?.updateInfo?.version;
+        return { version: app.getVersion(), latest: latest || null, available: !!latest && latest !== app.getVersion() };
+      };
     } catch (e) { log('updater unavailable:', e.message); }
   }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

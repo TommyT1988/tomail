@@ -168,21 +168,20 @@ function PhishingBanner({ message, senderInfo }) {
   );
 }
 /** Inline reply box under a message: plain text, sends with the original quoted. */
-function QuickReply({ message, toast, autoFocus, seed }) {
+function QuickReply({ message, toast, autoFocus, seed, open, setOpen }) {
   const [text, setText] = useState('');
-  const [open, setOpen] = useState(!!autoFocus);
-  useEffect(() => { if (seed) { setText(seed.text); setOpen(true); } }, [seed]);
+  useEffect(() => { if (seed) { setText(seed.text); setOpen(true); } }, [seed]);   // eslint-disable-line
   const [busy, setBusy] = useState(false);
   const [all, setAll] = useState(false);
   const ref = useRef(null);
-  useEffect(() => { setText(''); setOpen(!!autoFocus); }, [message.id, autoFocus]);
+  useEffect(() => { setText(''); setOpen(!!autoFocus); }, [message.id, autoFocus]);   // eslint-disable-line
   useEffect(() => { if (open) ref.current?.focus(); }, [open]);
   const sendIt = async () => {
     if (!text.trim()) return; setBusy(true);
     try { await window.mail.messages.quickReply(message.accountId, message.id, text, all); toast?.('Reply sent'); setText(''); setOpen(false); }
     catch (e) { toast?.(e.message, true); } finally { setBusy(false); }
   };
-  if (!open) return <div className="qr-closed"><button onClick={() => setOpen(true)}><Icon name="reply" size={12} /> Quick reply</button><button onClick={() => window.mail.compose.open({ mode: 'reply', accountId: message.accountId, originalId: message.id })}>Reply in a window</button></div>;
+  if (!open) return null;   // opened from Quick reply at the top of the message
   return (
     <div className="qr">
       <div className="qr-h"><span>Reply to <b>{message.fromName || message.fromEmail}</b>{(message.to?.length > 1 || message.cc?.length > 0) && <label style={{ marginLeft: 12 }}><input type="checkbox" checked={all} onChange={e => setAll(e.target.checked)} /> reply all</label>}</span><button onClick={() => window.mail.compose.open({ mode: all ? 'replyAll' : 'reply', accountId: message.accountId, originalId: message.id })}>Open in a window</button></div>
@@ -199,13 +198,17 @@ function FollowUpMenu({ message, toast }) {
     </Dropdown>
   );
 }
-function Header({ message, onPrint, extra, onPopOut, toast }) {
+function Header({ message, onPrint, extra, onPopOut, toast, onReply, onQuickReply }) {
   const from = { name: message.fromName, email: message.fromEmail };
+  const canReply = !message.labels?.includes('DRAFT');
   return (
     <div className="hdr">
       <h2>{message.subject || '(no subject)'}</h2>
       <div className="line first"><span><b>{fmtAddrFull(from)}</b></span><span className="when">{fmtFull(message.date)}</span>
-        <span className="hbtns"><FollowUpMenu message={message} toast={toast} />{onPopOut && <button title="Open in a new window (o)" onClick={() => onPopOut(message)}><Icon name="external" size={12} /> Window</button>}<button title="Print" onClick={() => onPrint(message)}>Print</button>{extra}</span></div>
+        <span className="hbtns">
+          {canReply && onReply && <button className="go" title="Reply in its own window (r)" onClick={() => onReply(message)}><Icon name="reply" size={12} /> Reply</button>}
+          {canReply && onQuickReply && <button title="Reply here without opening a window (Ctrl+Enter sends)" onClick={onQuickReply}><Icon name="send" size={12} /> Quick reply</button>}
+          <FollowUpMenu message={message} toast={toast} />{onPopOut && <button title="Open in a new window (o)" onClick={() => onPopOut(message)}><Icon name="external" size={12} /> Window</button>}<button title="Print" onClick={() => onPrint(message)}>Print</button>{extra}</span></div>
       <div className="line"><span>to {addrList(message.to) || '—'}</span>{message.cc?.length > 0 && <span>· cc {addrList(message.cc)}</span>}</div>
       {message.labels?.length > 0 && <div className="labs">{message.labels.filter(l => !['UNREAD', 'CATEGORY_PERSONAL'].includes(l) && !/^Label_\d+$/.test(l) && !/^\$Tomail/.test(l)).map(l => <span key={l}>{l.replace(/^CATEGORY_/, '').toLowerCase()}</span>)}</div>}
     </div>
@@ -254,6 +257,8 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
   const [senderInfo, setSenderInfo] = useState(null);
   const [seed, setSeed] = useState(null);
   const [openIds, setOpenIds] = useState(new Set());
+  const [qrOpen, setQrOpen] = useState(false);
+  useEffect(() => { setQrOpen(!!quickReply); }, [message?.id, quickReply]);
   useEffect(() => { if (thread?.length) setOpenIds(new Set([thread[thread.length - 1].id, ...thread.filter(m => m.unread).map(m => m.id)])); }, [thread?.map(m => m.id).join(',')]); // eslint-disable-line
   const allowRemote = !!(prefs?.loadRemoteImages || (message && allow[message.id]));
   if (!message) return <div className="read"><div className="empty"><div className="big"><Icon name="mail" size={56} style={{ strokeWidth: 1 }} /></div><div>{loading ? 'Loading…' : 'Select a message to read'}</div></div></div>;
@@ -263,21 +268,25 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
     return (
       <div className="read">
         <div className="hdr"><h2>{latest.subject || message.subject || '(no subject)'}</h2><div className="line"><span className="muted">{thread.length} messages in this conversation</span>
-          <span className="hbtns"><FollowUpMenu message={latest} toast={toast} />{onPopOut && <button onClick={() => onPopOut(latest)}><Icon name="external" size={12} /> Window</button>}<button onClick={() => setOpenIds(new Set(thread.map(m => m.id)))}>Expand all</button><button onClick={() => setOpenIds(new Set([latest.id]))}>Collapse</button></span></div></div>
+          <span className="hbtns">
+            {!latest.labels?.includes('SENT') && <button className="go" title="Reply in its own window (r)" onClick={() => onReplyTo(latest, 'reply')}><Icon name="reply" size={12} /> Reply</button>}
+            {!latest.labels?.includes('SENT') && <button title="Reply here without opening a window" onClick={() => setQrOpen(true)}><Icon name="send" size={12} /> Quick reply</button>}
+            <FollowUpMenu message={latest} toast={toast} />{onPopOut && <button onClick={() => onPopOut(latest)}><Icon name="external" size={12} /> Window</button>}<button onClick={() => setOpenIds(new Set(thread.map(m => m.id)))}>Expand all</button><button onClick={() => setOpenIds(new Set([latest.id]))}>Collapse</button></span></div></div>
         <SenderCard message={latest} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} onInfo={setSenderInfo} />
         {latest.bodyFetched && <PhishingBanner message={latest} senderInfo={senderInfo} />}
         {latest.bodyFetched && <AiPanel message={latest} thread={thread} onSuggest={(t) => setSeed({ text: t, at: Date.now() })} />}
         <div className="thread">
           {thread.map(m => <ThreadCard key={m.id} m={m.id === message.id ? message : m} open={openIds.has(m.id)} prefs={prefs} onRespond={onRespond} onPrint={onPrint} onReplyTo={onReplyTo} toast={toast}
             onToggle={() => setOpenIds(s => { const n = new Set(s); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })} />)}
-          {!latest.labels?.includes('SENT') && <QuickReply message={latest} toast={toast} autoFocus={quickReply} seed={seed} />}
+          {!latest.labels?.includes('SENT') && <QuickReply message={latest} toast={toast} autoFocus={quickReply} seed={seed} open={qrOpen} setOpen={setQrOpen} />}
         </div>
       </div>
     );
   }
   return (
     <div className="read">
-      <Header message={message} onPrint={onPrint} onPopOut={onPopOut} toast={toast} />
+      <Header message={message} onPrint={onPrint} onPopOut={onPopOut} toast={toast}
+        onReply={(m) => onReplyTo(m, 'reply')} onQuickReply={message.labels?.includes('SENT') ? null : () => setQrOpen(true)} />
       <SenderCard message={message} onOpenMessage={onOpenMessage} onRuleFromSender={onRuleFromSender} onInfo={setSenderInfo} />
       {message.bodyFetched && <PhishingBanner message={message} senderInfo={senderInfo} />}
       {message.bodyFetched && <AiPanel message={message} onSuggest={(t) => setSeed({ text: t, at: Date.now() })} />}
@@ -287,7 +296,7 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
       {hasRemoteImages(message.bodyHtml) && !allowRemote && <div className="imgbar"><Icon name="image" size={13} /> Remote images are blocked in this message. <button onClick={() => setAllow(a => ({ ...a, [message.id]: true }))}>Load images</button></div>}
       {!message.bodyFetched && loading && <div className="plain muted">Downloading message…</div>}
       {message.bodyHtml ? <BodyFrame html={message.bodyHtml} allowRemote={allowRemote} /> : <div className="plain">{message.bodyText || (message.bodyFetched ? '' : message.snippet)}</div>}
-      {message.bodyFetched && !message.labels?.includes('SENT') && <QuickReply message={message} toast={toast} autoFocus={quickReply} seed={seed} />}
+      {message.bodyFetched && !message.labels?.includes('SENT') && <QuickReply message={message} toast={toast} autoFocus={quickReply} seed={seed} open={qrOpen} setOpen={setQrOpen} />}
     </div>
   );
 }

@@ -44,7 +44,7 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ruleSeed, setRuleSeed] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sideW, setSideW] = useState(() => { const raw = localStorage.getItem('sideW'); const n = Number(raw); return raw != null && Number.isFinite(n) && n >= 0 ? n : 222; });   // Number(null) is 0, so check the key itself
   const [toastMsg, setToastMsg] = useState(null);
   const [sendState, setSendState] = useState(null);
   const [outbox, setOutbox] = useState([]);
@@ -61,6 +61,7 @@ export default function App() {
   const undoRef = useRef(null);
   const [signingIn, setSigningIn] = useState(false);
   const [updateReady, setUpdateReady] = useState(null);
+  const [checking, setChecking] = useState(false);
   const [listH, setListH] = useState(() => Number(localStorage.getItem('listH')) || 440);
   const [, tick] = useState(0);
   const viewRef = useRef(view); viewRef.current = view;
@@ -259,8 +260,18 @@ export default function App() {
   };
   const startDrag = (e) => {
     const y0 = e.clientY, h0 = listH;
-    const mv = (ev) => setListH(Math.max(120, h0 + ev.clientY - y0));
-    const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); localStorage.setItem('listH', String(listH)); };
+    let last = h0;
+    const mv = (ev) => { last = Math.max(120, h0 + ev.clientY - y0); setListH(last); };
+    const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); localStorage.setItem('listH', String(last)); };
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+  };
+  /** Folder list width: drag the strip beside it; pull it under 90px and it closes. */
+  const startSideDrag = (e) => {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = sideW;
+    let last = w0;
+    const mv = (ev) => { const w = w0 + ev.clientX - x0; last = w < 90 ? 0 : Math.min(520, w); setSideW(last); };
+    const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); localStorage.setItem('sideW', String(last)); };
     document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
   };
   const onSort = (col) => { const cur = view.sort || { col: 'date', dir: 'desc' }; const dir = cur.col === col ? (cur.dir === 'desc' ? 'asc' : 'desc') : (col === 'date' || col === 'size' ? 'desc' : 'asc'); if (col === 'date') localStorage.setItem('dateSort', dir); setViewRaw({ ...view, sort: col === 'date' && dir === 'desc' ? undefined : { col, dir } }); };
@@ -281,7 +292,6 @@ export default function App() {
   return (
     <div className="app">
       <div className="topbar">
-        <button className="burger" onClick={() => setSidebarOpen(o => !o)} title="Toggle folder list"><Icon name="menu" size={18} /></button>
         <div className="search">
           <div className="wrap">
             <input type="text" placeholder="Search  (Enter = local · Deep search = on the server, inside attachments)" value={search} onChange={e => setSearch(e.target.value)}
@@ -299,14 +309,14 @@ export default function App() {
           : <button className="new-btn" onClick={() => openCompose('new')} disabled={!accounts.length}><Icon name="plus" /> New</button>}
         <button onClick={() => { mail.sync.now(); toast('Checking for new mail…'); }} disabled={!accounts.length || info?.demo}><span className="ico"><Icon name="refresh" /></span>Refresh</button>
         <span className="spacer" />
-        <button disabled={!canReply} onClick={() => openCompose('reply')}><span className="ico"><Icon name="reply" /></span>Reply</button>
-        <button disabled={!canReply} onClick={() => openCompose('replyAll')}><span className="ico"><Icon name="replyAll" /></span>Reply All</button>
-        <button disabled={!canReply} onClick={() => openCompose('forward')}><span className="ico"><Icon name="forward" /></span>Forward</button>
+        <button className="act reply" disabled={!canReply} onClick={() => openCompose('reply')}><span className="ico"><Icon name="reply" /></span>Reply</button>
+        <button className="act reply" disabled={!canReply} onClick={() => openCompose('replyAll')}><span className="ico"><Icon name="replyAll" /></span>Reply All</button>
+        <button className="act fwd" disabled={!canReply} onClick={() => openCompose('forward')}><span className="ico"><Icon name="forward" /></span>Forward</button>
         <span className="sep" />
         <MarkMenu disabled={!hasSel} onMark={doMark} inSpam={view.labelId === 'SPAM'} />
         <span className="sep" />
-        {inTrash ? <button disabled={!hasSel} onClick={doRestore}><span className="ico"><Icon name="inbox" /></span>Restore</button>
-          : <button disabled={!hasSel} onClick={doArchive}><span className="ico"><Icon name="archive" /></span>Archive</button>}
+        {inTrash ? <button className="act arch" disabled={!hasSel} onClick={doRestore}><span className="ico"><Icon name="inbox" /></span>Restore</button>
+          : <button className="act arch" disabled={!hasSel} onClick={doArchive}><span className="ico"><Icon name="archive" /></span>Archive</button>}
         <SnoozeMenu disabled={!hasSel || inTrash} onSnooze={doSnooze} />
         <QuickActionsMenu disabled={!hasSel} labels={selLabels} onMove={doMove} inTrash={inTrash} onRestore={doRestore} onEmpty={doEmpty} onDeleteForever={doDeleteForever}
           canDeleteForever={!!(selAccount?.canDeleteForever)} folderName={view.labelId === 'SPAM' ? 'Junk' : 'Trash'}
@@ -314,10 +324,11 @@ export default function App() {
           onRuleFromSender={() => { const m = itemsRef.current.find(i => i.id === selected[0]?.id && i.accountId === selected[0]?.accountId); if (!m) return; setRuleSeed({ accountId: m.accountId, name: `From ${m.fromName || m.fromEmail}`, conditions: [{ field: 'from', op: 'contains', value: m.fromEmail }], actions: [{ type: 'moveTo', labelId: '' }] }); setSettingsOpen('rules'); }}
           onNewLabel={(n) => mail.labels.create(selected[0]?.accountId || view.accountId || accounts[0]?.id, n).then(() => toast('Folder created')).catch(e => toast(e.message, true))} />
         <span className="sep" />
-        <button disabled={!hasSel} onClick={doTrash} title={inTrash ? 'Delete permanently' : 'Move to Trash'}><span className="ico"><Icon name="trash" /></span>{inTrash ? 'Delete forever' : 'Delete'}</button>
+        <button className="act del" disabled={!hasSel} onClick={doTrash} title={inTrash ? 'Delete permanently' : 'Move to Trash'}><span className="ico"><Icon name="trash" /></span>{inTrash ? 'Delete forever' : 'Delete'}</button>
       </div>
-      <div className={'body' + (sidebarOpen ? '' : ' nosidebar')}>
-        {sidebarOpen && <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} onReorder={(ids) => mail.accounts.reorder(ids).then(loadMeta)} outboxCount={outbox.length} scheduledCount={scheduled.length} onOpenTab={(v) => openTab(v)} followups={{ total: followups.length, due: followups.filter(f => f.status === 'due').length }} onLabelMenu={(e, accountId, l) => setLabelMenu({ x: e.clientX, y: e.clientY, accountId, label: l })} />}
+      <div className="body" style={{ gridTemplateColumns: `${sideW}px 6px 1fr` }}>
+        {sideW > 0 ? <Sidebar accounts={accounts} labels={labels} counts={counts} view={view} setView={setView} status={status} draftCounts={draftCounts} onReorder={(ids) => mail.accounts.reorder(ids).then(loadMeta)} outboxCount={outbox.length} scheduledCount={scheduled.length} onOpenTab={(v) => openTab(v)} followups={{ total: followups.length, due: followups.filter(f => f.status === 'due').length }} onLabelMenu={(e, accountId, l) => setLabelMenu({ x: e.clientX, y: e.clientY, accountId, label: l })} /> : <div />}
+        <div className="vdivider" onMouseDown={startSideDrag} title="Drag to resize · double-click to hide or show" onDoubleClick={() => { const w = sideW > 0 ? 0 : 222; setSideW(w); localStorage.setItem('sideW', String(w)); }} />
         <div className="main">
           {!accounts.length && info && !info.demo ? (
             <div className="onboard">
@@ -374,11 +385,20 @@ export default function App() {
       </div>
       <div className="status">
         <span><span className={'led' + (anyErr ? ' err' : anyBusy ? ' busy' : '')} />
-          {anyErr ? `Sync problem: ${anyErr.error}` : initial ? `Downloading mailbox… ${(initial[1].synced || 0).toLocaleString()}${initial[1].total ? ' of ' + initial[1].total.toLocaleString() : ''}${initial[1].folder ? ' · ' + initial[1].folder : ''}` : anyBusy ? 'Checking for new mail…' : `Last checked ${ago(status.lastCheckedAt)}`}</span>
+          {anyErr ? `Sync problem: ${anyErr.error}` : initial ? <>Downloading mailbox… {(initial[1].synced || 0).toLocaleString()}{initial[1].total ? ' of ' + initial[1].total.toLocaleString() : ''}{initial[1].folder ? ' · ' + initial[1].folder : ''} <span className="faint" title="Gmail allows a fixed number of requests per minute. Tomail runs just under that limit; going faster would get the account rate-limited.">· speed limited by Google, not by Tomail</span></> : anyBusy ? 'Checking for new mail…' : `Last checked ${ago(status.lastCheckedAt)}`}</span>
         {info?.demo && <span style={{ color: '#c0392b' }}>DEMO MODE — sample data, not connected to any server</span>}
         {updateReady && <span>Tomail {updateReady.version} downloaded — <button className="primary" onClick={() => mail.app.installUpdate()}>Restart to update</button></span>}
         <span className="spacer" />
-        {info?.version && <span className="faint">v{info.version}</span>}
+        {info?.version && <button className="ver" disabled={checking} title="Check for a new version of Tomail" onClick={async () => {
+          setChecking(true);
+          try {
+            const r = await mail.app.checkForUpdates();
+            if (r.unsupported) toast(`Tomail v${r.version} — automatic updates only work in an installed build`);
+            else if (r.error) toast(`Couldn't check for updates: ${r.error}`, true);
+            else if (r.available) toast(`Tomail ${r.latest} is available — downloading it now`);
+            else toast(`You're on the latest version (v${r.version})`);
+          } finally { setChecking(false); }
+        }}>{checking ? 'Checking…' : `v${info.version}`}</button>}
         <button onClick={() => { mail.sync.now(); }} disabled={!accounts.length || info?.demo}><Icon name="refresh" size={12} /> Sync now</button>
       </div>
       {settingsOpen && <SettingsModal onClose={() => { setSettingsOpen(false); setRuleSeed(null); }} accounts={accounts} labels={labels} ruleSeed={ruleSeed} refreshAccounts={loadMeta} toast={toast} info={info} initialTab={typeof settingsOpen === 'string' ? settingsOpen : undefined} />}

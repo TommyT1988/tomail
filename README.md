@@ -52,10 +52,12 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - **Follow-up reminders**: "remind me if no reply by…" on anything you send; clears itself when they reply, nags you if they don't
 - **Rules**: file, label, archive, flag, read, junk or trash new mail by sender, recipient, subject, body or attachment; "Create rule from sender" in Quick Actions
 - Trash and Junk offer Restore, Delete forever and Empty folder
+- Resizable folder list (drag the strip beside it, double-click to hide it) and a draggable divider above the reading pane
 - Sortable columns, including **oldest first** if you like today's mail at the bottom (it opens there, and scrolling up loads older); drag accounts into your preferred order; right-click folders to rename, delete, colour or add subfolders
 
 **Writing**
 - Compose opens in its own window: reply, reply all, forward (with original attachments), new
+- The quoted original has a grip: drag it up to read more of what you're replying to
 - Send, Attach and Save draft live at the top of the window; recipients are chips (click to select, Delete to remove, double-click to edit)
 - Rich text: bold, italic, underline, lists, quotes, links, pasted or inserted images, an emoji picker
 - **Send from an alias**: add the other addresses your account can send as (Settings → Accounts → Aliases) and pick one in the From menu; replies default to the address the message was sent to
@@ -89,7 +91,7 @@ For any other provider, **Settings → Accounts → Add other account (IMAP)**: 
 - **Stays in the tray** so new mail still notifies you after you close the window, with start-at-login if you want it (Settings → General)
 - Remembers where you left the window, on the screen you left it on
 - Dark mode (system, light or dark)
-- Automatic updates
+- Automatic updates — click the version number at the bottom right to check now
 - Housekeeping: optionally keep downloaded bodies for 30 / 90 / 365 days; weekly database compaction
 - **App lock** with a passphrase (at startup and after idle) and **.mbox export** of any account
 - **Clean links**: tracking parameters stripped and redirectors unwrapped before a link opens in your browser

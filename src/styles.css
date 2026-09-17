@@ -42,8 +42,10 @@ a { color: var(--accent); }
 .toolbar .caret { font-size: 9px; margin-left: 4px; color: var(--muted); }
 
 /* ── body ── */
-.body { display: grid; grid-template-columns: 222px 1fr; min-height: 0; }
-.body.nosidebar { grid-template-columns: 0 1fr; }
+.body { display: grid; grid-template-columns: 222px 6px 1fr; min-height: 0; }
+.vdivider { cursor: col-resize; background: #f0f0f0; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+.vdivider:hover { background: var(--accent-bg); }
+:root.dark .vdivider { background: var(--panel); }
 .sidebar { border-right: 1px solid var(--border); overflow: auto; background: var(--bg); padding: 6px 0 20px; }
 .sidebar h1 { font-size: 15px; margin: 6px 12px 8px; }
 .tree .sect { display: flex; align-items: center; gap: 4px; padding: 3px 12px 3px 8px; color: var(--muted); font-size: 12px; cursor: pointer; user-select: none; }
@@ -123,6 +125,8 @@ a { color: var(--accent); }
 .status .led.err { background: var(--danger); }
 @keyframes pulse { to { opacity: .3; } }
 .status .spacer { flex: 1; }
+.status .ver { color: var(--faint); padding: 1px 6px; }
+.status .ver:hover:not(:disabled) { color: var(--accent); background: var(--hover); }
 .status button { padding: 1px 8px; font-size: 12px; }
 
 /* ── dropdown menus ── */
@@ -151,8 +155,11 @@ a { color: var(--accent); }
 .compose .field label { color: var(--muted); font-size: 12px; text-align: right; }
 .compose .field input, .compose .field select { width: 100%; }
 .compose textarea { width: 100%; height: 260px; resize: vertical; padding: 8px; line-height: 1.4; }
-.compose .quote { margin-top: 8px; border-left: 3px solid #ddd; padding-left: 10px; color: #555; font-size: 12px; max-height: 160px; overflow: auto; }
-.compose .quote iframe { width: 100%; height: 150px; border: 0; }
+.compose .quote { position: relative; margin-top: 8px; border-left: 3px solid #ddd; padding: 6px 0 0 10px; color: #555; font-size: 12px; overflow: hidden; display: flex; flex-direction: column; }
+.compose .quote iframe { width: 100%; border: 0; flex: none; }
+.compose .quote .qgrip { position: absolute; top: 0; left: 0; right: 0; height: 10px; cursor: row-resize; text-align: center; line-height: 4px;
+  color: var(--faint); background: linear-gradient(to bottom, var(--group), transparent); user-select: none; }
+.compose .quote .qgrip:hover { color: var(--accent); background: linear-gradient(to bottom, var(--accent-bg), transparent); }
 .compose .atts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .compose .atts span { border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 12px; }
 .compose .ccbcc { color: var(--accent); font-size: 12px; padding: 0 4px; }
@@ -190,6 +197,25 @@ a { color: var(--accent); }
 .onboard { max-width: 520px; margin: 60px auto; line-height: 1.6; }
 .onboard h2 { margin-top: 0; }
 .onboard .steps { background: #fafafa; border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px 12px 32px; }
+
+/* ── a bit of colour: the actions people reach for most, and the folders they live in ── */
+.toolbar button.act .ico { color: inherit; }
+.toolbar button.act.reply .ico { color: #1f7a33; }
+.toolbar button.act.fwd .ico { color: #2f6fcb; }
+.toolbar button.act.arch .ico { color: #8a7a55; }
+.toolbar button.act.del .ico { color: var(--danger); }
+.toolbar button.act:disabled .ico { color: #c2c2c2; }
+:root.dark .toolbar button.act.reply .ico { color: #5ec47a; }
+:root.dark .toolbar button.act.fwd .ico { color: #7aa9ea; }
+:root.dark .toolbar button.act.arch .ico { color: #c4b184; }
+:root.dark .toolbar button.act.del .ico { color: #e8776a; }
+:root.dark .toolbar button.act:disabled .ico { color: #555; }
+/* the green Reply at the top of a message — the one thing you do most */
+button.go { background: #1f7a33; color: #fff; border-color: #1f7a33; font-weight: 600; }
+button.go:hover:not(:disabled) { background: #19662a; }
+:root.dark button.go { background: #2e8b46; border-color: #2e8b46; }
+:root.dark button.go:hover:not(:disabled) { background: #36a153; }
+.read .hdr .hbtns button.go .ic { color: #fff; }
 
 /* ── dark theme ── */
 :root.dark { --bg: #1e1f22; --panel: #26272b; --border: #3a3b40; --text: #e6e6e6; --muted: #a0a0a6; --faint: #6f6f76; --accent: #6ea0ec; --accent-bg: #2e3b52; --sel: #34456a; --hover: #2d3036; --group: #2b2c31; color-scheme: dark; }
@@ -284,7 +310,7 @@ a { color: var(--accent); }
 .compose.standalone .mf { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); align-items: center; background: #fafafa; }
 :root.dark .compose.standalone .mf { background: var(--panel); }
 .compose.standalone .mf .spacer { flex: 1; }
-.compose.standalone .quote { max-height: 200px; }
+
 
 /* ── previews, undo toast, send banner, shortcuts, label menu ── */
 .thumbs { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 16px; border-bottom: 1px solid var(--border); }

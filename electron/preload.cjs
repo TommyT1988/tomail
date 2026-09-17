@@ -34,7 +34,7 @@ const api = {
   compose: { pickFiles: () => call('compose:pickFiles'), open: (payload) => call('compose:open', payload), payload: (id) => call('compose:payload', id), closeNow: (id) => call('compose:closeNow', id) },
   sync: { now: (accountId) => call('sync:now', accountId), status: () => call('sync:status') },
   shell: { openExternal: (url) => call('shell:openExternal', url) },
-  app: { info: () => call('app:info'), installUpdate: () => call('app:installUpdate'), setBadge: (count, dataUrl) => call('app:setBadge', count, dataUrl), openLogs: () => call('app:openLogs'), reportProblem: (d) => call('app:reportProblem', d), dbInfo: () => call('app:dbInfo'), compactDb: () => call('app:compactDb') },
+  app: { info: () => call('app:info'), installUpdate: () => call('app:installUpdate'), checkForUpdates: () => call('app:checkForUpdates'), setBadge: (count, dataUrl) => call('app:setBadge', count, dataUrl), openLogs: () => call('app:openLogs'), reportProblem: (d) => call('app:reportProblem', d), dbInfo: () => call('app:dbInfo'), compactDb: () => call('app:compactDb') },
   send: { queue: (p) => call('send:queue', p), cancel: (id) => call('send:cancel', id) },
   scheduled: { add: (p, at) => call('scheduled:add', p, at), list: () => call('scheduled:list'), sendNow: (id) => call('scheduled:sendNow', id), reschedule: (id, at) => call('scheduled:reschedule', id, at), cancel: (id) => call('scheduled:cancel', id) },
   snippets: { list: () => call('snippets:list'), save: (s) => call('snippets:save', s), remove: (id) => call('snippets:remove', id) },

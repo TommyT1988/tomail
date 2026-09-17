@@ -47,6 +47,16 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
   const [saveState, setSaveState] = useState('');
   const [followUpAt, setFollowUpAt] = useState(null);
   const [snippets, setSnippets] = useState([]);
+  // how much of the quoted original to show — dragged by its grip, remembered between messages
+  const [quoteH, setQuoteH] = useState(() => { const n = Number(localStorage.getItem('quoteH')); return Number.isFinite(n) && n >= 60 ? n : 150; });   // a missing key gives 0, which fails the >= 60 test
+  const startQuoteDrag = (e) => {
+    e.preventDefault();
+    const y0 = e.clientY, h0 = quoteH;
+    let last = h0;
+    const mv = (ev) => { last = Math.max(60, Math.min(900, h0 - (ev.clientY - y0))); setQuoteH(last); };
+    const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); localStorage.setItem('quoteH', String(last)); };
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+  };
   const [aiOn, setAiOn] = useState(false); const [aiPrompt, setAiPrompt] = useState(null);
   const ai = useAiStream();
   useEffect(() => { window.mail.settings.get().then(s => setAiOn(!!s.prefs.ai?.enabled)); }, []);
@@ -175,7 +185,11 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
               {draft.mode === 'forward' && orig?.attachments?.length > 0 && <label style={{ fontSize: 12 }}><input type="checkbox" checked={!!f.includeOrigAtts} onChange={e => { setF(x => ({ ...x, includeOrigAtts: e.target.checked })); dirty.current = true; scheduleSave(); }} /> include {orig.attachments.length} original attachment{orig.attachments.length > 1 ? 's' : ''}</label>}
             </div>
           )}
-          {f.quotedHtml && <div className="quote"><div className="muted" style={{ marginBottom: 4 }}>Quoted message (sent below your text)</div><iframe title="quoted" sandbox="" srcDoc={buildDoc(f.quotedHtml, { allowRemote: false })} /></div>}
+          {f.quotedHtml && <div className="quote" style={{ maxHeight: quoteH + 34 }}>
+            <div className="qgrip" onMouseDown={startQuoteDrag} title="Drag to show more or less of the original">⋯</div>
+            <div className="muted" style={{ marginBottom: 4 }}>Quoted message (sent below your text)</div>
+            <iframe title="quoted" sandbox="" srcDoc={buildDoc(f.quotedHtml, { allowRemote: false })} style={{ height: quoteH }} />
+          </div>}
         </div>
         {!standalone && <div className="mf">
           <button className="primary" onClick={send} disabled={sending}>{sending ? 'Sending…' : <><Icon name="send" /> Send</>}</button>
