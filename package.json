@@ -2,7 +2,7 @@
   "name": "tomail",
   "productName": "Tomail",
   "version": "0.9.6",
-  "description": "Tomail \u2014 a fast desktop email client for Gmail and Google Workspace",
+  "description": "Tomail — a fast desktop email client for Gmail and Google Workspace",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -16,15 +16,15 @@
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
-    "imapflow": "^2.0.2",
-    "mailparser": "^3.9.26",
-    "nodemailer": "^10.0.9"
+    "imapflow": "^2.0.5",
+    "mailparser": "^3.9.28",
+    "nodemailer": "^10.0.10"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.1",
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.5",
     "cross-env": "^10.1.0",
-    "electron": "^44.3.0",
+    "electron": "^44.4.1",
     "electron-builder": "^26.16.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
