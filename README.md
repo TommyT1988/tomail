@@ -197,7 +197,7 @@ test/                     node:test suite (db, mime, batch parsing, sync, action
 
 | Version | Highlights |
 |---|---|
-| 0.9.7 | One bar across the top with search in the middle, one compact message header with all the reply actions in it (no more duplicate Reply buttons), "always load images from this sender", Electron 44.4 and current dependencies, and a release check that only publishes a complete build |
+| 0.9.7 | One bar across the top with search in the middle, one compact message header with all the reply actions in it (no more duplicate Reply buttons), "always load images from this sender", new mail that keeps arriving during a first sync even when Gmail is rate-limiting the download, Electron 44.4 and current dependencies, and a release check that only publishes a complete build |
 | 0.9.6 | Proton Mail via Bridge · edit the quoted original when replying · a rate limiter that slows down when Gmail says to · resizable folder list, Reply at the top of a message, a version button that checks for updates, and some colour |
 | 0.9 | Tray icon with start-at-login, remembered window position, send-as aliases, oldest-first that opens on today, a settings dialog that stays put, new mail during a first sync, read-ahead so clicks are instant, and a mailbox of 200,000 that stops stalling |
 | 0.8 | Local AI via Ollama: summaries, suggested replies, drafting in your tone, rewriting, rules from a sentence |

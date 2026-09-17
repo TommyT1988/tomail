@@ -10,7 +10,9 @@ const BATCH = 40;          // 40 × 5 units = 200 units per batch; the client's 
 const PAGE = 500;          // messages.list max
 const PAUSE_MS = 50;       // budget does the real pacing
 const BG = { priority: PRIORITY.background };   // sync traffic yields to anything the person is waiting for
+const NOW = { priority: PRIORITY.interactive }; // the mid-backfill new-mail check: small, and must not queue behind the backfill's own batches
 const NEW_MAIL_CHECK_MS = 45000;   // a 200k-message backfill takes hours — look for new mail this often while it runs
+const RECENT_SWEEP = 100;          // newest messages listed by hand when the history cursor has expired mid-backfill
 
 /** Gmail message resource (format=metadata|full) → normalised row for db.upsertMessages */
 function normaliseMessage(m) {
@@ -41,10 +43,11 @@ class AccountSync {
     this.newFromIncremental = [];    // inbox ids the history deltas found — genuinely new mail, not backfill
     this.lastNewCheck = 0;
     this.newMailCheckMs = newMailCheckMs;
-    this.historyLost = false;
+    this.checking = null;            // the in-flight mid-backfill check, so two never walk the history at once
+    this.ticker = null;
   }
   get account() { return this.db.getAccount(this.accountId); }
-  cancel() { this.cancelled = true; }
+  cancel() { this.cancelled = true; this.stopNewMailTicker(); }
 
   async syncLabels() {
     const j = await this.client.get('/labels', null, BG);
@@ -56,7 +59,7 @@ class AccountSync {
   async run() {
     if (this.running) return;
     this.running = true; this.cancelled = false;
-    this.didInitial = false; this.newFromIncremental = []; this.historyLost = false;
+    this.didInitial = false; this.newFromIncremental = [];
     try {
       const acct = this.account;
       if (!acct) return;
@@ -77,6 +80,15 @@ class AccountSync {
   async initial() {
     this.didInitial = true;
     this.lastNewCheck = Date.now();
+    this.startNewMailTicker();
+    try { await this.backfill(); } finally { this.stopNewMailTicker(); }
+    if (this.cancelled) return;
+    if (this.checking) await this.checking;   // never two history walks from the same cursor
+    // Anything that changed during the (possibly long) initial pass:
+    await this.incremental();
+  }
+
+  async backfill() {
     let acct = this.account;
     if (!acct.history_id) {
       // Pin the history cursor BEFORE listing so nothing that changes mid-sync is lost.
@@ -110,25 +122,65 @@ class AccountSync {
       if (!pageToken) break;
     }
     this.db.updateAccount(this.accountId, { initial_done: 1, next_page_token: null });
-    // Anything that changed during the (possibly long) initial pass:
-    await this.incremental();
   }
 
   /**
    * Mail that arrives while the backfill is running must not wait for it to finish: every
    * NEW_MAIL_CHECK_MS, spend one cheap history.list call on the delta and store what it finds.
+   * It runs on its own timer as well as between batches — a batch can sit in a rate-limit
+   * back-off for minutes, and new mail must not wait for that — and at interactive priority,
+   * so it is served before the backfill's own queued requests.
    */
-  async checkNewMail() {
-    if (this.cancelled || this.historyLost) return;
-    if (Date.now() - this.lastNewCheck < this.newMailCheckMs) return;
+  startNewMailTicker() {
+    this.stopNewMailTicker();
+    if (!this.newMailCheckMs) return;   // 0 = check after every batch (tests)
+    this.ticker = setInterval(() => { this.checkNewMail().catch(() => {}); }, this.newMailCheckMs);
+  }
+  stopNewMailTicker() { clearInterval(this.ticker); this.ticker = null; }
+
+  checkNewMail() {
+    if (this.cancelled || this.checking) return Promise.resolve();
+    if (Date.now() - this.lastNewCheck < this.newMailCheckMs) return Promise.resolve();
     this.lastNewCheck = Date.now();
-    try {
-      const r = await this.incremental({ duringInitial: true });
-      if (r?.newInbox?.length) this.log(`new mail during backfill: ${r.newInbox.length}`);
-    } catch (e) {
-      this.log(`new-mail check during backfill: ${e.message}`);
-    }
-    this.lastNewCheck = Date.now();   // measure the gap from the END of the check
+    this.checking = (async () => {
+      try {
+        const r = await this.incremental({ duringInitial: true });
+        if (r?.newInbox?.length) this.log(`new mail during backfill: ${r.newInbox.length}`);
+      } catch (e) {
+        this.log(`new-mail check during backfill: ${e.message}`);
+      } finally {
+        this.lastNewCheck = Date.now();   // measure the gap from the END of the check
+        this.checking = null;
+      }
+    })();
+    return this.checking;
+  }
+
+  /**
+   * The history cursor pinned when a days-long backfill began can expire (Gmail keeps roughly a
+   * week). Going quiet until the backfill ends — and then re-listing the whole mailbox — is the
+   * wrong answer for someone waiting on today's mail: pin a fresh cursor and pick up the newest
+   * messages by hand instead. Label changes made in the gap on already-stored mail are the one
+   * thing this cannot recover.
+   */
+  async recoverCursor() {
+    const prof = await this.client.get('/profile', null, NOW);
+    const page = await this.client.get('/messages', { maxResults: RECENT_SWEEP, includeSpamTrash: true }, NOW);
+    const ids = (page.messages || []).map(m => m.id);
+    const known = this.db.existingIds(this.accountId, ids);
+    const toFetch = ids.filter(id => !known.has(id));
+    for (let i = 0; i < toFetch.length; i += BATCH) await this.fetchAndStore(toFetch.slice(i, i + BATCH), 'metadata', NOW);
+    this.db.updateAccount(this.accountId, { history_id: String(prof.historyId) });
+    this.log(`history cursor expired during backfill — re-pinned at ${prof.historyId}; ${toFetch.length} recent message(s) picked up by hand`);
+    const newInbox = toFetch.filter(id => this.db.getMessage(this.accountId, id)?.labels?.includes('INBOX'));
+    this.reportNew(newInbox, true);
+    return { added: toFetch.length, deleted: 0, labelOps: 0, newInbox, recovered: true };
+  }
+
+  reportNew(newInbox, duringInitial) {
+    if (!newInbox.length) return;
+    this.newFromIncremental.push(...newInbox);
+    if (duringInitial) { try { this.onNewMail(newInbox); } catch (e) { this.log('new-mail callback: ' + e.message); } }
   }
 
   async fetchAndStore(ids, format = 'metadata', { priority = PRIORITY.background } = {}) {
@@ -149,6 +201,7 @@ class AccountSync {
     const acct = this.account;
     if (!acct.history_id) return this.initial();
     if (!duringInitial) this.onProgress({ phase: 'incremental' });
+    const lane = duringInitial ? NOW : BG;
     let pageToken;
     let latest = acct.history_id;
     const added = new Set(), deleted = new Set();
@@ -156,7 +209,7 @@ class AccountSync {
     try {
       for (;;) {
         const j = await this.client.get('/history', { startHistoryId: acct.history_id, maxResults: 500, pageToken,
-          historyTypes: ['messageAdded', 'messageDeleted', 'labelAdded', 'labelRemoved'] }, BG);
+          historyTypes: ['messageAdded', 'messageDeleted', 'labelAdded', 'labelRemoved'] }, lane);
         for (const h of j.history || []) {
           for (const x of h.messagesAdded || []) added.add(x.message.id);
           for (const x of h.messagesDeleted || []) { deleted.add(x.message.id); added.delete(x.message.id); }
@@ -169,9 +222,8 @@ class AccountSync {
       }
     } catch (e) {
       if (e instanceof GmailError && e.status === 404) {
-        // Mid-backfill this must NOT restart the backfill — stop checking and let the pass that
-        // follows the backfill decide what to do.
-        if (duringInitial) { this.historyLost = true; this.log('history cursor expired during backfill — new-mail checks paused'); return { added: 0, deleted: 0, labelOps: 0, newInbox: [] }; }
+        // Mid-backfill this must NOT restart the backfill.
+        if (duringInitial) return this.recoverCursor();
         // History expired (mailbox idle > ~a week or too many changes) → full resync, keeping bodies where possible.
         this.log(`history expired for account ${this.accountId} — full resync`);
         this.db.updateAccount(this.accountId, { history_id: null, initial_done: 0, next_page_token: null, synced_count: 0 });
@@ -188,13 +240,10 @@ class AccountSync {
     const toFetch = [...added].filter(id => !deleted.has(id));
     // Label ops on messages we've never seen (e.g. read on phone before we synced) → fetch fresh too.
     for (const op of labelOps) if (!deleted.has(op.id) && !this.db.existingIds(this.accountId, [op.id]).size && !added.has(op.id)) toFetch.push(op.id);
-    for (let i = 0; i < toFetch.length; i += BATCH) await this.fetchAndStore(toFetch.slice(i, i + BATCH));
+    for (let i = 0; i < toFetch.length; i += BATCH) await this.fetchAndStore(toFetch.slice(i, i + BATCH), 'metadata', lane);
     this.db.updateAccount(this.accountId, { history_id: latest });
     const newInbox = toFetch.filter(id => this.db.getMessage(this.accountId, id)?.labels?.includes('INBOX'));
-    if (newInbox.length) {
-      this.newFromIncremental.push(...newInbox);
-      if (duringInitial) { try { this.onNewMail(newInbox); } catch (e) { this.log('new-mail callback: ' + e.message); } }
-    }
+    this.reportNew(newInbox, duringInitial);
     return { added: toFetch.length, deleted: deleted.size, labelOps: labelOps.length, newInbox };
   }
 }

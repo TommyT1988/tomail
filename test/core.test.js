@@ -87,8 +87,8 @@ function fakeGmail(seed) {
   const api = {
     store, history, calls,
     bump(type, id, labelIds) { history.push({ id: String(++hid), [type]: [{ message: { id, ...(labelIds ? {} : {}) }, ...(labelIds ? { labelIds } : {}) }] }); return String(hid); },
-    async get(path, query = {}) {
-      calls.push(['GET', path, query]);
+    async get(path, query = {}, opts) {
+      calls.push(['GET', path, query, opts]);
       if (path === '/profile') return { emailAddress: 'a@x.com', historyId: String(hid), messagesTotal: store.size };
       if (path === '/labels') return { labels: [{ id: 'INBOX', name: 'INBOX', type: 'system' }, { id: 'Label_1', name: 'Customers', type: 'user' }] };
       if (path === '/messages') { const ids = [...store.keys()].reverse(); const page = Number(query.pageToken || 0); const slice = ids.slice(page * 2, page * 2 + 2); return { messages: slice.map(id => ({ id })), nextPageToken: ids.length > (page + 1) * 2 ? String(page + 1) : undefined }; }
@@ -96,7 +96,7 @@ function fakeGmail(seed) {
       const m = /^\/messages\/([^/?]+)$/.exec(path); if (m) { const x = store.get(m[1]); if (!x) { const e = new Error('404'); e.status = 404; throw e; } return x; }
       throw new Error('unhandled ' + path);
     },
-    async batchGet(paths) { calls.push(['BATCH', paths.length]); return paths.map(p => { const id = /\/messages\/([^/?]+)/.exec(p)[1]; const x = store.get(id); return x ? { ok: true, status: 200, body: x } : { ok: false, status: 404, body: null }; }); },
+    async batchGet(paths, opts) { calls.push(['BATCH', paths.length, opts]); return paths.map(p => { const id = /\/messages\/([^/?]+)/.exec(p)[1]; const x = store.get(id); return x ? { ok: true, status: 200, body: x } : { ok: false, status: 404, body: null }; }); },
     async post(path, body) {
       calls.push(['POST', path, body]);
       if (path === '/messages/batchModify') { for (const id of body.ids) { const x = store.get(id); if (!x) continue; x.labelIds = [...new Set([...x.labelIds.filter(l => !body.removeLabelIds.includes(l)), ...body.addLabelIds])]; } return null; }
@@ -373,6 +373,64 @@ test('sync: new mail arrives DURING a long backfill, not after it', async () => 
   p.syncer.newMailCheckMs = 0;
   assert.ok(!r.newInbox.includes('old7'), 'backfilled mail is not "new"');
   assert.ok(r.newInbox.length < 10, `only genuinely new mail is reported (${r.newInbox.length})`);
+});
+
+test('sync: the new-mail check keeps running while a backfill batch is stuck in a rate-limit back-off', async () => {
+  const { GmailError, PRIORITY } = require('../electron/gmail/api');
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const g = fakeGmail(Array.from({ length: 12 }, (_, i) => msg('old' + i, ['INBOX'])));
+  const origGet = g.get.bind(g); g.get = async (p, q, o) => { try { return await origGet(p, q, o); } catch (e) { if (e.status === 404) throw new GmailError(404, 'not found'); throw e; } };
+  // the second backfill batch hits Gmail's per-minute limit and sits in the client's 15 s+ back-off (here: until we say so)
+  let release; const stuck = new Promise(r => { release = r; });
+  let batches = 0; const origBatch = g.batchGet.bind(g);
+  g.batchGet = async (paths, o) => { if (paths.some(p => p.includes('/messages/old')) && ++batches === 2) await stuck; return origBatch(paths, o); };
+
+  const notified = []; let notifiedWhileStuck = false, released = false;
+  const s = new AccountSync({ db, client: g, account: { id: a.id }, newMailCheckMs: 20 });
+  s.onNewMail = (ids) => { notified.push(...ids); if (!released) notifiedWhileStuck = true; };
+  const run = s.run();
+  setTimeout(() => { g.store.set('fresh1', msg('fresh1', ['INBOX', 'UNREAD'])); g.bump('messagesAdded', 'fresh1'); }, 30);   // arrives while batch 2 is stuck
+  setTimeout(() => { released = true; release(); }, 250);
+  await run;
+
+  assert.deepEqual(notified, ['fresh1']);
+  assert.ok(notifiedWhileStuck, 'the new message was reported while the backfill batch was still waiting');
+  assert.equal(db.countMessages({ kind: 'all', accountId: a.id }), 13, 'and the backfill still completed');
+  assert.equal(s.ticker, null, 'the timer stops with the backfill');
+  const hist = g.calls.filter(c => c[0] === 'GET' && c[1] === '/history');
+  assert.ok(hist.length >= 2 && hist.slice(0, -1).every(c => c[3]?.priority === PRIORITY.interactive), 'the mid-backfill checks do not queue behind the backfill');
+  assert.equal(hist.at(-1)[3]?.priority, PRIORITY.background, 'the closing pass after the backfill is ordinary sync traffic');
+  assert.ok(g.calls.filter(c => c[0] === 'BATCH').every(c => c[2]?.priority === PRIORITY.background || c[1] === 1), 'the backfill itself stays background');
+});
+
+test('sync: an expired history cursor mid-backfill re-pins and sweeps recent mail — no silence, no full resync after', async () => {
+  const { GmailError } = require('../electron/gmail/api');
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  const g = fakeGmail(Array.from({ length: 20 }, (_, i) => msg('old' + i, ['INBOX'])));
+  let pinned = null, expired = false;
+  const origGet = g.get.bind(g);
+  g.get = async (p, q, o) => {
+    if (p === '/profile' && !pinned) { const r = await origGet(p, q, o); pinned = r.historyId; return r; }
+    if (p === '/history' && expired && q.startHistoryId === pinned) throw new GmailError(404, 'history expired');
+    try { return await origGet(p, q, o); } catch (e) { if (e.status === 404) throw new GmailError(404, 'not found'); throw e; }
+  };
+  const notified = [], logs = []; let injected = false;
+  const s = new AccountSync({
+    db, client: g, account: { id: a.id }, newMailCheckMs: 0, log: (m) => logs.push(m),
+    onProgress: (p) => { if (p.phase === 'initial' && p.synced >= 4 && !injected) { injected = true; expired = true; g.store.set('fresh1', msg('fresh1', ['INBOX', 'UNREAD'])); g.bump('messagesAdded', 'fresh1'); } },
+  });
+  s.onNewMail = (ids) => notified.push(...ids);
+  await s.run();
+
+  assert.deepEqual(notified, ['fresh1'], 'mail that arrived after the cursor died still showed up during the backfill');
+  assert.ok(logs.some(l => /re-pinned/.test(l)), logs.join('\n'));
+  assert.notEqual(db.getAccount(a.id).history_id, pinned, 'the cursor moved on');
+  assert.equal(db.getAccount(a.id).initial_done, 1);
+  assert.equal(db.countMessages({ kind: 'all', accountId: a.id }), 21);
+  assert.equal(g.calls.filter(c => c[0] === 'GET' && c[1] === '/profile').length, 2, 'one re-pin, no full resync');
+  assert.equal(db.getAccount(a.id).synced_count > 0, true);
 });
 
 test('quota budget: what the person is waiting for goes before the backfill', async () => {
