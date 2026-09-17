@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { addrList, escapeHtml, fmtAddrFull, fmtFull, htmlToText, textToQuoted } from '../util.js';
 import { buildDoc } from './ReadingPane.jsx';
-import RichEditor from './RichEditor.jsx';
+import RichEditor, { cleanHtml } from './RichEditor.jsx';
 import Icon from './Icons.jsx';
 import AddressInput from './AddressInput.jsx';
 import { Dropdown, MI } from './Menus.jsx';
@@ -49,6 +49,15 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
   const [snippets, setSnippets] = useState([]);
   // how much of the quoted original to show — dragged by its grip, remembered between messages
   const [quoteH, setQuoteH] = useState(() => { const n = Number(localStorage.getItem('quoteH')); return Number.isFinite(n) && n >= 60 ? n : 150; });   // a missing key gives 0, which fails the >= 60 test
+  /** Move the quoted original into the editor so it can be trimmed or annotated like the rest of the reply.
+   *  It goes in with the same wrapper the send path would have added, so what's sent is unchanged. */
+  const editQuote = () => {
+    const q = cleanHtml(f.quotedHtml || '');
+    if (!q) return;
+    setF(x => ({ ...x, html: `${x.html}<br><div class="tomail_quote">${q}</div>`, quotedHtml: '', quotedText: '' }));
+    dirty.current = true; scheduleSave();
+    toast('The original is now part of your message — edit or delete any of it');
+  };
   const startQuoteDrag = (e) => {
     e.preventDefault();
     const y0 = e.clientY, h0 = quoteH;
@@ -187,7 +196,7 @@ export default function Compose({ draft, accounts, prefs, onClose, toast, standa
           )}
           {f.quotedHtml && <div className="quote" style={{ maxHeight: quoteH + 34 }}>
             <div className="qgrip" onMouseDown={startQuoteDrag} title="Drag to show more or less of the original">⋯</div>
-            <div className="muted" style={{ marginBottom: 4 }}>Quoted message (sent below your text)</div>
+            <div className="muted qhead">Quoted message (sent below your text)<button onClick={editQuote} title="Bring it into the message above so you can change or trim it"><Icon name="edit" size={11} /> Edit it</button></div>
             <iframe title="quoted" sandbox="" srcDoc={buildDoc(f.quotedHtml, { allowRemote: false })} style={{ height: quoteH }} />
           </div>}
         </div>

@@ -159,6 +159,9 @@ a { color: var(--accent); }
 .compose .quote iframe { width: 100%; border: 0; flex: none; }
 .compose .quote .qgrip { position: absolute; top: 0; left: 0; right: 0; height: 10px; cursor: row-resize; text-align: center; line-height: 4px;
   color: var(--faint); background: linear-gradient(to bottom, var(--group), transparent); user-select: none; }
+.compose .quote .qhead { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.compose .quote .qhead button { font-size: 11px; padding: 1px 6px; color: var(--accent); }
+.compose .quote .qhead button:hover { background: var(--accent-bg); }
 .compose .quote .qgrip:hover { color: var(--accent); background: linear-gradient(to bottom, var(--accent-bg), transparent); }
 .compose .atts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .compose .atts span { border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 12px; }

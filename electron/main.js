@@ -13,7 +13,7 @@ const { autoconfig, ImapProvider } = require('./providers/imap');
 const { buildDoc } = require('./printDoc');
 const { runRules } = require('./rules');
 const { createLogger } = require('./logger');
-const { PRIORITY } = require('./gmail/api');
+const { PRIORITY, budget } = require('./gmail/api');
 const { cleanUrl } = require('./links');
 const { exportMbox } = require('./exportMbox');
 const achievements = require('./achievements');
@@ -431,10 +431,15 @@ let prefetching = false;
 async function prefetchBodies() {
   if (DEMO || prefetching) return;
   if (settings.get().prefs.prefetchBodies === false) return;
+  // Reading ahead is the first thing to give up: not while anything is still backfilling, and not while
+  // Gmail is pushing back on how fast we're going.
+  if (budget.limited) return;
+  const accts = db.listAccounts();
+  if (accts.some(a => !a.initial_done)) return;
   prefetching = true;
   try {
-    for (const acc of db.listAccounts()) {
-      if (!acc.initial_done || syncing.has(acc.id)) continue;
+    for (const acc of accts) {
+      if (syncing.has(acc.id)) continue;
       const ids = db.bodiesToPrefetch(acc.id, PREFETCH_BATCH + prefetchFailed.size).filter(id => !prefetchFailed.has(`${acc.id}:${id}`)).slice(0, PREFETCH_BATCH);
       for (const id of ids) {
         try { await actions.getMessage(acc.id, id, { priority: PRIORITY.prefetch, quiet: true }); }

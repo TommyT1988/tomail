@@ -588,3 +588,68 @@ test('conversation view: walking the index agrees with grouping in SQL', () => {
   assert.equal(inbox.filter(r => r.threadId === 'long').length, 1, 'and it appears once');
   assert.ok(inbox.some(r => r.id === 'nothread'), 'a message with no thread still shows');
 });
+
+test('quota: Gmail pushing back slows everything down, and the speed comes back', async () => {
+  const { GmailClient, budget, PRIORITY } = require('../electron/gmail/api');
+  budget.rate = 200; budget.pushbackAt = 0; budget.recoverAt = 0; budget.tokens = 400; budget.at = Date.now(); budget.waiting = [];
+
+  let calls = 0;
+  const quota = { ok: false, status: 429, headers: { get: () => null }, text: async () => JSON.stringify({ error: { message: "Quota exceeded for quota metric 'Total Query Cost'", errors: [{ reason: 'rateLimitExceeded' }] } }) };
+  const fine = { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ id: 'x' }), text: async () => '{}' };
+  const c = new GmailClient({ getAccessToken: async () => 't', forceRefresh: async () => 't' },
+    { fetchImpl: async () => (++calls === 1 ? quota : fine), log: () => {} });
+
+  const before = budget.rate;
+  await c.get('/messages/abc', { format: 'full' }, { priority: PRIORITY.interactive });
+  assert.equal(budget.rate, before / 2, 'one knock-back halves the rate');
+  assert.equal(budget.limited, true, 'and read-ahead knows to stand down');
+  assert.equal(calls, 2, 'the request itself still succeeded on the retry');
+
+  const afterOne = budget.rate;
+  budget.penalise(); budget.penalise(); budget.penalise();
+  assert.equal(budget.rate, afterOne, 'a burst of failures counts as one episode, not four');
+  budget.pushbackAt = Date.now() - 5000;
+  budget.penalise();
+  assert.equal(budget.rate, Math.round(afterOne / 2), 'a later episode does slow it again');
+  for (let i = 0; i < 10; i++) { budget.pushbackAt = Date.now() - 5000; budget.penalise(); }
+  assert.ok(budget.rate >= 40, 'but it never slows below a floor');
+
+  // a quiet minute earns speed back
+  budget.pushbackAt = budget.recoverAt = Date.now() - 61000;
+  const slow = budget.rate;
+  budget.pump();
+  assert.ok(budget.rate > slow, `climbs back up (${slow} → ${budget.rate})`);
+  assert.equal(budget.limited, false, 'and read-ahead is allowed again');
+
+  // what the person sees is never Google's raw sentence
+  const always = new GmailClient({ getAccessToken: async () => 't', forceRefresh: async () => 't' },
+    { fetchImpl: async () => quota, log: () => {} });
+  budget.rate = 200; budget.tokens = 400; budget.at = Date.now();
+  await assert.rejects(() => always.get('/messages/abc', null, { priority: PRIORITY.interactive, retries: 0 }),
+    (e) => { assert.match(e.message, /limiting how fast/); assert.doesNotMatch(e.message, /quota metric/); return true; });
+  budget.rate = 200; budget.pushbackAt = 0; budget.recoverAt = 0; budget.tokens = 400;
+});
+
+test('editing the quoted original sends exactly what leaving it alone would', async () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', displayName: 'Alex', tokenEnc: Buffer.from('plain:{}') });
+  let raw = null;
+  const actions = new Actions({ db, providers: () => ({ send: async (m) => { raw = m.raw; return { id: 's1' }; } }), onChange: () => {}, log: () => {} });
+  const decode = () => Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString();
+  const body = '<p>Yes, still in stock.</p>';
+  const quote = '<div>On Tue, someone wrote:</div><blockquote>Is it available?</blockquote>';
+
+  // as the compose window sends it when the quote is left in its box
+  await actions.send({ accountId: a.id, to: 'b@x.com', subject: 'Re: stock', html: body, text: 'Yes, still in stock.', quotedHtml: quote, quotedText: '> Is it available?' });
+  const untouched = decode();
+
+  // and after "Edit it" folds the quote into the message, exactly as the button does
+  await actions.send({ accountId: a.id, to: 'b@x.com', subject: 'Re: stock', html: `${body}<br><div class="tomail_quote">${quote}</div>`, text: 'Yes, still in stock.' });
+  const edited = decode();
+
+  // compare the html part itself; the MIME boundary is random per message
+  const htmlPart = (s) => s.slice(s.indexOf('<p>Yes')).replace(/=\r?\n/g, '').replace(/\s+/g, ' ').split('----')[0].trim();
+  assert.equal(htmlPart(edited), htmlPart(untouched), 'the html that goes out is the same either way');
+  assert.match(edited, /tomail_quote/);
+  assert.match(edited, /Is it available\?/);
+});
