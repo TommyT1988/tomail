@@ -69,6 +69,25 @@ const syncing = new Set();
 const lastSyncAt = new Map();   // accountId → ms
 const pushTimers = new Map();
 
+/**
+ * Hand a file to whatever the desktop opens it with.
+ *
+ * shell.openPath only resolves when the helper process exits, and on Linux it can stay pending
+ * forever (a viewer that runs in the foreground of xdg-open, or no handler installed at all).
+ * Awaiting it directly left the IPC reply outstanding until Electron gave up with "reply was never
+ * sent" — an error dialog for an attachment that had opened perfectly well. So: report a failure if
+ * the OS produces one quickly, otherwise assume it launched and stop waiting.
+ */
+const OPEN_GRACE_MS = 2500;
+function handToDesktop(file) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (err) => { if (!done) { done = true; resolve(err || ''); } };
+    shell.openPath(file).then(finish, (e) => finish(e?.message || String(e)));
+    setTimeout(() => { if (!done) log('open attachment: no answer from the desktop yet, assuming it opened —', path.basename(file)); finish(''); }, OPEN_GRACE_MS);
+  });
+}
+
 /** Every external link goes through here: tracking params stripped, redirectors unwrapped (Settings → General). */
 function openLink(url) {
   if (!/^https?:|^mailto:/.test(url)) return;
@@ -310,6 +329,16 @@ function createWindow() {
         })()`));
         await js(`(() => { [...document.querySelectorAll('.settings .snav button')].find(b => /General/.test(b.textContent))?.click(); })()`);
         await wait(400); await shot('13-settings.png');
+        await js(`(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))()`);
+        await wait(300);
+        // regression guard: opening an attachment must RESOLVE even when the desktop never answers
+        // (shell.openPath can stay pending forever on Linux — that was the "reply was never sent" dialog)
+        log('ATTACH ' + await js(`(async () => {
+          const t0 = Date.now();
+          try { const f = await window.mail.attachments.open(1, 'demo6', { filename: 'stocklist.pdf', mimeType: 'application/pdf', attachmentId: 'x' });
+                return JSON.stringify({ ok: true, ms: Date.now() - t0, file: String(f).split('/').pop() }); }
+          catch (e) { return JSON.stringify({ ok: false, ms: Date.now() - t0, error: e.message }); }
+        })()`));
         await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return window.mail.settings.set({ prefs: { theme: 'dark' } }).then(() => { document.documentElement.dataset.theme = 'dark'; }); })()`);
         await js(`(() => { document.documentElement.classList.add('dark'); const r = [...document.querySelectorAll('.row')].find(r => r.textContent.includes('Amazon Europe')); if (r) r.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); })()`);
         await wait(900); await shot('7-dark.png');
@@ -561,7 +590,7 @@ function registerIpc() {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tomail-'));
     const file = path.join(dir, (att.filename || 'attachment').replace(/[\\/:*?"<>|]/g, '_'));
     fs.writeFileSync(file, await actions.getAttachment(accountId, messageId, att.attachmentId));
-    const err = await shell.openPath(file);
+    const err = await handToDesktop(file);
     if (err) throw new Error(err);
     return file;
   });

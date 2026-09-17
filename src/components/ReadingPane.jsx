@@ -37,13 +37,15 @@ function BodyFrame({ html, allowRemote, autoHeight }) {
 }
 
 const isImage = (a) => /^image\//i.test(a.mimeType || '') && (a.size || 0) < 12 * 1024 * 1024;
+/** Attachment trouble goes to the toast; a native alert box in the middle of the window is not an answer. */
+const report = (toast, e) => { const m = e?.message || String(e); if (toast) toast(m, true); else alert(m); };
 const canPreview = (a) => isImage(a) || /^application\/pdf$/i.test(a.mimeType || '') || /\.pdf$/i.test(a.filename || '') || /^text\/plain$/i.test(a.mimeType || '') || /\.txt$/i.test(a.filename || '');
-function Thumb({ m, a }) {
+function Thumb({ m, a, toast }) {
   const [src, setSrc] = useState(null);
   useEffect(() => { let on = true; window.mail.attachments.data(m.accountId, m.id, a).then(d => on && setSrc(d)).catch(() => {}); return () => { on = false; }; }, [m.accountId, m.id, a.attachmentId]);
-  return src ? <img src={src} alt={a.filename} className="thumb" onClick={() => window.mail.attachments.preview(m.accountId, m.id, a).catch(e => alert(e.message))} title="Click to open full size" /> : <span className="thumb ph" />;
+  return src ? <img src={src} alt={a.filename} className="thumb" onClick={() => window.mail.attachments.preview(m.accountId, m.id, a).catch(e => report(toast, e))} title="Click to open full size" /> : <span className="thumb ph" />;
 }
-function Attachments({ m, cls = 'atts' }) {
+function Attachments({ m, cls = 'atts', toast }) {
   if (!m.attachments?.length) return null;
   const images = m.attachments.filter(isImage);
   return (
@@ -51,13 +53,13 @@ function Attachments({ m, cls = 'atts' }) {
       <div className={cls}>
         {m.attachments.map((a, i) => (
           <span className="att" key={i} title={a.mimeType}><Icon name="clip" size={12} /> {a.filename} <span className="sz">{fmtSize(a.size)}</span>
-            {canPreview(a) && <button onClick={() => window.mail.attachments.preview(m.accountId, m.id, a).catch(e => alert(e.message))}>Preview</button>}
-            <button onClick={() => window.mail.attachments.open(m.accountId, m.id, a).catch(e => alert(e.message))}>Open</button>
-            <button onClick={() => window.mail.attachments.save(m.accountId, m.id, a).catch(e => alert(e.message))}>Save</button>
+            {canPreview(a) && <button onClick={() => window.mail.attachments.preview(m.accountId, m.id, a).catch(e => report(toast, e))}>Preview</button>}
+            <button onClick={() => window.mail.attachments.open(m.accountId, m.id, a).catch(e => report(toast, e))}>Open</button>
+            <button onClick={() => window.mail.attachments.save(m.accountId, m.id, a).catch(e => report(toast, e))}>Save</button>
           </span>
         ))}
       </div>
-      {images.length > 0 && <div className="thumbs">{images.map((a, i) => <Thumb key={i} m={m} a={a} />)}</div>}
+      {images.length > 0 && <div className="thumbs">{images.map((a, i) => <Thumb key={i} m={m} a={a} toast={toast} />)}</div>}
     </>
   );
 }
@@ -211,7 +213,7 @@ function Header({ message, onPrint, extra, onPopOut, toast }) {
 }
 
 /** One message in a conversation stack. Fetches its body when first expanded. */
-function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo }) {
+function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo, toast }) {
   const [full, setFull] = useState(m.bodyFetched ? m : null);
   const [allow, setAllow] = useState(false);
   useEffect(() => { if (open && (!full || !full.bodyFetched)) window.mail.messages.get(m.accountId, m.id).then(setFull).catch(() => {}); }, [open, m.accountId, m.id]); // eslint-disable-line
@@ -232,7 +234,7 @@ function ThreadCard({ m, open, onToggle, prefs, onRespond, onPrint, onReplyTo })
       {open && (
         <div className="cb">
           {body.calendar && <InviteCard m={body} onRespond={onRespond} />}
-          <Attachments m={body} />
+          <Attachments m={body} toast={toast} />
           {hasRemoteImages(body.bodyHtml) && !allowRemote && <div className="imgbar"><Icon name="image" size={13} /> Remote images blocked. <button onClick={() => setAllow(true)}>Load images</button></div>}
           {body.bodyHtml ? <BodyFrame html={body.bodyHtml} allowRemote={allowRemote} autoHeight /> : <div className="plain">{body.bodyText || (body.bodyFetched ? '' : 'Loading…')}</div>}
           <div className="cactions">
@@ -266,7 +268,7 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
         {latest.bodyFetched && <PhishingBanner message={latest} senderInfo={senderInfo} />}
         {latest.bodyFetched && <AiPanel message={latest} thread={thread} onSuggest={(t) => setSeed({ text: t, at: Date.now() })} />}
         <div className="thread">
-          {thread.map(m => <ThreadCard key={m.id} m={m.id === message.id ? message : m} open={openIds.has(m.id)} prefs={prefs} onRespond={onRespond} onPrint={onPrint} onReplyTo={onReplyTo}
+          {thread.map(m => <ThreadCard key={m.id} m={m.id === message.id ? message : m} open={openIds.has(m.id)} prefs={prefs} onRespond={onRespond} onPrint={onPrint} onReplyTo={onReplyTo} toast={toast}
             onToggle={() => setOpenIds(s => { const n = new Set(s); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })} />)}
           {!latest.labels?.includes('SENT') && <QuickReply message={latest} toast={toast} autoFocus={quickReply} seed={seed} />}
         </div>
@@ -280,7 +282,7 @@ export default function ReadingPane({ message, thread, loading, prefs, error, on
       {message.bodyFetched && <PhishingBanner message={message} senderInfo={senderInfo} />}
       {message.bodyFetched && <AiPanel message={message} onSuggest={(t) => setSeed({ text: t, at: Date.now() })} />}
       {message.calendar && <InviteCard m={message} onRespond={onRespond} />}
-      <Attachments m={message} />
+      <Attachments m={message} toast={toast} />
       {error && <div className="imgbar" style={{ background: '#fde8e6', borderColor: '#f3b5ae' }}>⚠ {error}</div>}
       {hasRemoteImages(message.bodyHtml) && !allowRemote && <div className="imgbar"><Icon name="image" size={13} /> Remote images are blocked in this message. <button onClick={() => setAllow(a => ({ ...a, [message.id]: true }))}>Load images</button></div>}
       {!message.bodyFetched && loading && <div className="plain muted">Downloading message…</div>}
