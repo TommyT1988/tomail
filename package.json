@@ -85,13 +85,6 @@
             "x64",
             "arm64"
           ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
         }
       ],
       "category": "public.app-category.productivity"
@@ -105,7 +98,8 @@
         "provider": "github",
         "owner": "TommyT1988",
         "repo": "tomail",
-        "releaseType": "release"
+        "releaseType": "release",
+        "timeout": 900000
       }
     ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
