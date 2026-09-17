@@ -691,7 +691,7 @@ app.whenReady().then(async () => {
   if (db.labelDateBackfillMs) log(`folder index filled in for the existing mailbox (${db.labelDateBackfillMs}ms, one-off)`);
   accounts = new AccountManager({ db, settings, safeStorage, log });
   if (DEMO) { seedDemo(db); const dp = new DemoProvider(db); accounts.provider = () => dp; }
-  actions = new Actions({ db, providers: (id) => accounts.provider(id), onChange: notifyChanged, log });
+  actions = new Actions({ db, providers: (id) => accounts.provider(id), onChange: notifyChanged, onMessageUpdated: (accountId, id) => send('message:updated', { accountId, id }), log });
   registerIpc();
   applyTray();
   const wantAutostart = !!settings.get().prefs.startAtLogin;

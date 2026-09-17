@@ -60,7 +60,9 @@ class GmailClient {
     this.tokens = tokenProvider; this.fetch = fetchImpl; this.log = log;
   }
 
-  async request(method, path, { query, body, raw = false, retries = 8, cost, priority = PRIORITY.interactive } = {}) {
+  async request(method, path, { query, body, raw = false, retries, cost, priority = PRIORITY.interactive } = {}) {
+    const waiting = priority >= PRIORITY.interactive;          // someone is watching a spinner
+    if (retries == null) retries = waiting ? 3 : 8;
     const url = new URL(path.startsWith('http') ? path : BASE + path);
     if (query) for (const [k, v] of Object.entries(query)) {
       if (v == null) continue;
@@ -70,10 +72,18 @@ class GmailClient {
     await budget.take(cost ?? costOf(method, url.pathname, query), priority);
     for (let attempt = 0; ; attempt++) {
       const token = await this.tokens.getAccessToken();
-      const r = await this.fetch(url, {
-        method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-      });
+      let r;
+      try {
+        r = await this.fetch(url, {
+          method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+          body: body ? JSON.stringify(body) : undefined,
+          // nothing may hang forever: without this a stalled socket leaves the caller waiting indefinitely
+          signal: AbortSignal.timeout(waiting ? 20000 : 60000),
+        });
+      } catch (e) {
+        if (attempt < retries) { this.log(`gmail ${method} ${url.pathname} ${e.name === 'TimeoutError' ? 'timed out' : e.message} — retry`); await sleep(Math.min(8000, 500 * 2 ** attempt)); continue; }
+        throw new GmailError(0, `Gmail ${method} ${url.pathname}: ${e.name === 'TimeoutError' ? 'timed out' : e.message}`);
+      }
       if (r.ok) return r.status === 204 ? null : raw ? r : r.json();
       const text = await r.text();
       let j = null; try { j = JSON.parse(text); } catch {}
@@ -83,7 +93,9 @@ class GmailClient {
       const retryable = quota || r.status >= 500 || /backendError/.test(reason);
       if (retryable && attempt < retries) {
         const ra = Number(r.headers.get('retry-after')) * 1000;
-        const wait = quota ? Math.max(ra || 0, Math.min(90000, 15000 * (attempt + 1))) + Math.random() * 2000 : Math.min(30000, 500 * 2 ** attempt) + Math.random() * 250;
+        // A backfill can afford to sleep 15s on a quota knock-back; a person waiting for a message can't.
+        const quotaWait = waiting ? Math.min(4000, 1200 * (attempt + 1)) : Math.max(ra || 0, Math.min(90000, 15000 * (attempt + 1)));
+        const wait = quota ? quotaWait + Math.random() * (waiting ? 300 : 2000) : Math.min(30000, 500 * 2 ** attempt) + Math.random() * 250;
         this.log(`gmail ${r.status} ${reason || ''} — retry in ${Math.round(wait)}ms`);
         await sleep(wait); continue;
       }

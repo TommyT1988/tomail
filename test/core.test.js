@@ -448,3 +448,46 @@ test('folder listing: the date carried on the label row stays true, and the inde
   assert.match(plan, /message_labels_date/, 'walks the folder index');
   assert.doesNotMatch(plan, /TEMP B-TREE/, 'and never sorts the whole folder to take one page');
 });
+
+test('opening a message: slow inline images do not hold it up, they arrive after', async () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  db.upsertMessages(a.id, [normaliseMessage(msg('big', ['INBOX']))]);
+
+  const slow = new Map();                       // contentId → resolve fn, for the ones we hold back
+  let live = 0, peak = 0;
+  const atts = Array.from({ length: 12 }, (_, i) => ({ contentId: 'img' + i, mimeType: 'image/png', size: 900, attachmentId: 'at' + i }));
+  const html = '<p>hello</p>' + atts.map(x => `<img src="cid:${x.contentId}">`).join('');
+  const provider = {
+    fetchFull: async () => ({
+      meta: null, html, text: 'hello', calendar: null, attachments: atts,
+      inlineData: async (x) => {
+        live++; peak = Math.max(peak, live);
+        try {
+          const n = Number(x.contentId.slice(3));
+          if (n >= 9) await new Promise(r => slow.set(x.contentId, r));   // three that never finish in time
+          return Buffer.from('png' + n);
+        } finally { live--; }
+      },
+    }),
+  };
+  const updated = [];
+  const actions = new Actions({ db, providers: () => provider, onChange: () => {}, onMessageUpdated: (acc, id) => updated.push(id), log: () => {} });
+
+  const t0 = Date.now();
+  const m = await actions.getMessage(a.id, 'big');
+  const took = Date.now() - t0;
+
+  assert.ok(took < 4000, `the message came back without waiting for the stuck images (${took}ms)`);
+  assert.ok(peak <= 5, `no more than five images in flight at once (peak ${peak})`);
+  assert.match(m.bodyHtml, /data:image\/png;base64/, 'the images that arrived are embedded');
+  assert.match(m.bodyHtml, /cid:img9/, 'the stuck ones are still placeholders for now');
+  assert.equal(m.attachments.filter(x => !x.inline).length, 0, 'inline images never show up as attachments');
+  assert.deepEqual(updated, [], 'nothing announced yet');
+
+  for (const [, r] of slow) r();                 // the slow ones finally answer
+  await new Promise(r => setTimeout(r, 120));
+  assert.deepEqual(updated, ['big'], 'the window is told once');
+  const after = db.getMessage(a.id, 'big');
+  assert.doesNotMatch(after.bodyHtml, /cid:img/, 'and every image is embedded in the stored copy');
+});

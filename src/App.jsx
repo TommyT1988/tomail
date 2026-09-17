@@ -65,6 +65,7 @@ export default function App() {
   const [, tick] = useState(0);
   const viewRef = useRef(view); viewRef.current = view;
   const itemsRef = useRef(items); itemsRef.current = items;
+  const messageRef = useRef(message); messageRef.current = message;
   const threadedRef = useRef(threaded); threadedRef.current = threaded;
   const markTimer = useRef(null);
   const draftsRef = useRef(drafts); draftsRef.current = drafts;
@@ -127,6 +128,11 @@ export default function App() {
   useEffect(() => { loadList(view); }, [view, threaded, loadList]);
   useEffect(() => {
     const off1 = mail.on('mail:changed', () => { loadMeta(); loadList(viewRef.current, { keep: true }); });
+    // a message whose inline images arrived after it was shown: refresh it in place if it's still open
+    const off8 = mail.on('message:updated', ({ accountId, id }) => {
+      if (messageRef.current?.id !== id || messageRef.current?.accountId !== accountId) return;
+      mail.messages.get(accountId, id).then(full => setMessage(cur => (cur && cur.id === id ? full : cur))).catch(() => {});
+    });
     const off2 = mail.on('sync:status', (s) => setStatus(s));
     const off3 = mail.on('app:update-ready', (u) => setUpdateReady(u));
     const off4 = mail.on('app:open-message', ({ accountId, id, quickReply }) => { setView(HOME); setTimeout(() => { setSelected([{ accountId, id }]); if (quickReply) setQuickReplyFocus(true); }, 300); });
@@ -138,7 +144,7 @@ export default function App() {
     const off5 = mail.on('send:state', (s) => { if (s.state === 'pending' || s.state === 'sending') setSendState(s); else { setSendState(null); if (s.state === 'sent') toast('Message sent'); else if (s.state === 'outbox') toast(s.error); else if (s.state === 'failed') toast('Send failed: ' + s.error + (s.draftId ? ' — the draft is kept' : ''), true); } loadMeta(); });
     const mq = window.matchMedia('(prefers-color-scheme: dark)'); const onMq = () => { mail.settings.get().then(s => applyTheme(s.prefs.theme)); tick(x => x + 1); }; mq.addEventListener('change', onMq);
     const t = setInterval(() => tick(x => x + 1), 30000);
-    return () => { off1(); off2(); off3(); off4(); off5(); off6(); off7(); clearInterval(t); clearInterval(idle); mq.removeEventListener('change', onMq); };
+    return () => { off1(); off2(); off3(); off4(); off5(); off6(); off7(); off8(); clearInterval(t); clearInterval(idle); mq.removeEventListener('change', onMq); };
   }, [loadMeta, loadList, setView]);
   useEffect(() => { if (!settingsOpen) mail.settings.get().then(s => { setPrefs(s.prefs); applyTheme(s.prefs.theme); }); }, [settingsOpen]);
 

@@ -6,11 +6,13 @@ const { SNOOZE_LABEL_NAME } = require('./db');
 const { parseIcs, buildReply } = require('./calendar');
 
 const INLINE_MAX = 3 * 1024 * 1024;
+const INLINE_CONCURRENCY = 5;      // a marketing mail can carry dozens of inline images; don't fire them all at once
+const INLINE_DEADLINE_MS = 2500;   // after this the message is shown anyway and the rest arrive behind it
 
 class Actions {
   /** providers(accountId) → provider; db → MailDb; onChange() → notify renderer */
-  constructor({ db, providers, onChange = () => {}, log = () => {} }) {
-    this.db = db; this.providers = providers; this.onChange = onChange; this.log = log;
+  constructor({ db, providers, onChange = () => {}, onMessageUpdated = () => {}, log = () => {} }) {
+    this.db = db; this.providers = providers; this.onChange = onChange; this.onMessageUpdated = onMessageUpdated; this.log = log;
   }
   groupByAccount(targets) {
     const g = new Map();
@@ -110,25 +112,57 @@ class Actions {
   }
 
   // ── reading ──
+  /** Run `fn` over `items`, `limit` at a time. */
+  eachLimit(items, limit, fn) {
+    const queue = [...items];
+    return Promise.all(Array.from({ length: Math.min(limit, queue.length) }, async () => {
+      while (queue.length) await fn(queue.shift());
+    }));
+  }
+  /** Swap every `cid:` reference we have the bytes for into the html. */
+  embedInline(html, got) {
+    for (const [cid, r] of got) {
+      if (!r) continue;
+      html = html.split('cid:' + cid).join(`data:${r.mimeType};base64,${r.data.toString('base64')}`);
+    }
+    return html;
+  }
+  /** The images that were still in flight when the message was shown: patch them in when they land. */
+  async patchLateImages(accountId, id, inFlight, got) {
+    await inFlight;                                   // the SAME requests, not new ones
+    const m = this.db.getMessage(accountId, id);
+    if (!m?.bodyHtml) return;
+    const html = this.embedInline(m.bodyHtml, got);
+    if (html === m.bodyHtml) return;
+    this.db.setBody(accountId, id, { text: m.bodyText, html, attachments: m.attachments });
+    this.log(`${id}: late inline image(s) filled in`);
+    this.onMessageUpdated(accountId, id);
+  }
   async getMessage(accountId, id) {
     let m = this.db.getMessage(accountId, id);
     if (!m) return null;
     if (m.bodyFetched) return m;
     const p = this.providers(accountId);
+    const t0 = Date.now();
     const full = await p.fetchFull(id);
+    const tBody = Date.now() - t0;
     let html = full.html || '';
-    // Inline images are fetched TOGETHER, not one after another: each is its own round trip, and a
-    // message with several of them used to open a round trip at a time while you waited.
+    /* Inline images are each their own round trip. Waiting for all of them before showing anything is
+       why a newsletter could sit on "Downloading message…" for ten seconds: one slow or rate-limited
+       image held up the whole message. Fetch a few at a time, show the message once the deadline
+       passes, and let whatever is left arrive behind it. */
     const inline = full.attachments.filter(a => a.contentId && html.includes('cid:' + a.contentId) && (a.size || 0) <= INLINE_MAX);
-    const fetched = await Promise.all(inline.map(async (a) => {
-      try { return { a, data: await full.inlineData(a) }; }
-      catch (e) { this.log(`inline image ${a.contentId}: ${e.message}`); return null; }
-    }));
-    for (const r of fetched) {
-      if (!r) continue;
-      html = html.split('cid:' + r.a.contentId).join(`data:${r.a.mimeType};base64,${Buffer.from(r.data).toString('base64')}`);
-      r.a.inline = true;
-    }
+    for (const a of inline) a.inline = true;      // they belong in the body, not the attachment strip
+    const got = new Map();
+    const inFlight = this.eachLimit(inline, INLINE_CONCURRENCY, async (a) => {
+      try { got.set(a.contentId, { mimeType: a.mimeType, data: Buffer.from(await full.inlineData(a)) }); }
+      catch (e) { got.set(a.contentId, null); this.log(`inline image ${a.contentId}: ${e.message}`); }
+    });
+    await Promise.race([inFlight, new Promise(r => setTimeout(r, INLINE_DEADLINE_MS))]);
+    html = this.embedInline(html, got);
+    const late = inline.length - got.size;
+    const tInline = Date.now() - t0 - tBody;
+    if (tBody + tInline > 1500) this.log(`opened ${id}: body ${tBody}ms, ${inline.length} inline image(s) ${tInline}ms${late ? `, ${late} still coming` : ''}`);
     const text = full.text || htmlToText(html);
     // calendar invite: text/calendar part, or an .ics attachment
     let ics = full.calendar || null;
@@ -138,6 +172,7 @@ class Actions {
     if (full.meta) this.db.upsertMessages(accountId, [full.meta]);
     this.db.setBody(accountId, id, { text, html, attachments });
     if (event) this.db.setCalendar(accountId, id, event);
+    if (late) this.patchLateImages(accountId, id, inFlight, got).catch(() => {});
     m = this.db.getMessage(accountId, id);
     this.onChange();
     return m;
