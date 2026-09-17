@@ -374,3 +374,49 @@ test('sync: new mail arrives DURING a long backfill, not after it', async () => 
   assert.ok(!r.newInbox.includes('old7'), 'backfilled mail is not "new"');
   assert.ok(r.newInbox.length < 10, `only genuinely new mail is reported (${r.newInbox.length})`);
 });
+
+test('quota budget: what the person is waiting for goes before the backfill', async () => {
+  const { budget, PRIORITY } = require('../electron/gmail/api');
+  budget.tokens = 0;                       // bucket empty, as it is mid-backfill
+  budget.at = Date.now();
+  const order = [];
+  const bg1 = budget.take(200, PRIORITY.background).then(() => order.push('backfill-1'));
+  const bg2 = budget.take(200, PRIORITY.background).then(() => order.push('backfill-2'));
+  await new Promise(r => setTimeout(r, 30));
+  const click = budget.take(5, PRIORITY.interactive).then(() => order.push('click'));
+  await Promise.all([bg1, bg2, click]);
+  assert.equal(order[0], 'click', 'the click is served first even though it arrived last');
+  assert.deepEqual(order, ['click', 'backfill-1', 'backfill-2'], 'and the backfill keeps its own order');
+});
+
+test('counts: totals, unread, snoozed and trashed all land in the right place', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  db.upsertMessages(a.id, [
+    msg('c1', ['INBOX', 'UNREAD']),
+    msg('c2', ['INBOX']),
+    msg('c3', ['INBOX', 'UNREAD', 'STARRED']),
+    msg('c4', ['TRASH', 'UNREAD']),          // trash doesn't count towards unread
+    msg('c5', ['SENT']),
+    msg('c6', ['INBOX', 'UNREAD']),          // about to be snoozed away
+  ].map(normaliseMessage));
+  db.applyLabelChange(a.id, ['c3'], { add: ['STARRED'] });
+  db.setSnooze(a.id, ['c6'], Date.now() + 3600000);
+
+  const c = db.counts();
+  assert.equal(c.labels[a.id].INBOX.total, 3, 'inbox holds c1, c2, c3 — the snoozed one is hidden');
+  assert.equal(c.labels[a.id].INBOX.unread, 2, 'c1 and c3; c6 is snoozed');
+  assert.equal(c.favourites.inboxTotal, 3);
+  assert.equal(c.favourites.inboxUnread, 2);
+  assert.equal(c.favourites.unread, 2, 'the trashed unread one is not counted');
+  assert.equal(c.favourites.starred, 1);
+  assert.equal(c.favourites.snoozed, 1);
+  assert.equal(c.labels[a.id].SENT.total, 1);
+
+  // reading one, and waking the snoozed one, move the numbers
+  db.applyLabelChange(a.id, ['c1'], { remove: ['UNREAD'] });
+  db.setSnooze(a.id, ['c6'], null);        // it wakes
+  const d = db.counts();
+  assert.equal(d.favourites.inboxUnread, 2, 'c3 plus the woken c6');
+  assert.equal(d.labels[a.id].INBOX.total, 4);
+});

@@ -2,7 +2,7 @@
 // Gmail provider: wraps the REST client + sync engine behind the common provider interface.
 const { AccountSync, normaliseMessage } = require('../gmail/sync');
 const { parsePayload, b64urlDecode } = require('../gmail/mime');
-const { GmailError } = require('../gmail/api');
+const { GmailError, PRIORITY } = require('../gmail/api');
 
 class GmailProvider {
   constructor({ db, accountId, client, log = () => {} }) {
@@ -50,7 +50,8 @@ class GmailProvider {
     const ids = (j.messages || []).map(m => m.id);
     const known = this.db.existingIds(this.accountId, ids);
     const missing = ids.filter(id => !known.has(id));
-    for (let i = 0; i < missing.length; i += 50) await this._syncer().fetchAndStore(missing.slice(i, i + 50));
+    // a search is someone waiting at the keyboard, so these go in the interactive lane
+    for (let i = 0; i < missing.length; i += 50) await this._syncer().fetchAndStore(missing.slice(i, i + 50), 'metadata', { priority: PRIORITY.interactive });
     return ids;
   }
   async createLabel(name) {

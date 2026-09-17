@@ -7,17 +7,31 @@ const BATCH_URL = 'https://www.googleapis.com/batch/gmail/v1';
 // Gmail quota: 15,000 units per user per minute (250/s). We budget 200/s with a burst of 1,000
 // so a long initial sync never trips the limit and everything else (actions, search) shares the pool.
 const UNITS_PER_SEC = 200, BURST = 1000;
+// Anything the person is waiting for goes first. A backfill batch reserves 200 units at a time, and
+// when the bucket is empty that batch waits about a second; a plain queue made every click wait behind it.
+const PRIORITY = { interactive: 10, background: 0 };
 class Budget {
-  constructor() { this.tokens = BURST; this.at = Date.now(); this.queue = Promise.resolve(); }
-  take(cost) {
-    this.queue = this.queue.then(async () => {
-      for (;;) {
-        const now = Date.now(); this.tokens = Math.min(BURST, this.tokens + (now - this.at) / 1000 * UNITS_PER_SEC); this.at = now;
-        if (this.tokens >= cost) { this.tokens -= cost; return; }
-        await sleep(Math.ceil((cost - this.tokens) / UNITS_PER_SEC * 1000) + 20);
-      }
+  constructor() { this.tokens = BURST; this.at = Date.now(); this.waiting = []; this.seq = 0; this.timer = null; }
+  take(cost, priority = PRIORITY.interactive) {
+    return new Promise((resolve) => {
+      this.waiting.push({ cost, priority, seq: this.seq++, resolve });
+      this.pump();
     });
-    return this.queue;
+  }
+  pump() {
+    const now = Date.now();
+    this.tokens = Math.min(BURST, this.tokens + (now - this.at) / 1000 * UNITS_PER_SEC); this.at = now;
+    // highest priority first, and first-come-first-served within a priority
+    this.waiting.sort((a, b) => b.priority - a.priority || a.seq - b.seq);
+    while (this.waiting.length && this.tokens >= this.waiting[0].cost) {
+      const w = this.waiting.shift(); this.tokens -= w.cost; w.resolve();
+    }
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    if (this.waiting.length) {
+      const need = this.waiting[0].cost - this.tokens;
+      // NOT unref'd: something is waiting on quota, so the loop should stay alive for it
+      this.timer = setTimeout(() => { this.timer = null; this.pump(); }, Math.max(20, Math.ceil(need / UNITS_PER_SEC * 1000) + 20));
+    }
   }
 }
 const budget = new Budget();
@@ -46,14 +60,14 @@ class GmailClient {
     this.tokens = tokenProvider; this.fetch = fetchImpl; this.log = log;
   }
 
-  async request(method, path, { query, body, raw = false, retries = 8, cost } = {}) {
+  async request(method, path, { query, body, raw = false, retries = 8, cost, priority = PRIORITY.interactive } = {}) {
     const url = new URL(path.startsWith('http') ? path : BASE + path);
     if (query) for (const [k, v] of Object.entries(query)) {
       if (v == null) continue;
       if (Array.isArray(v)) v.forEach(x => url.searchParams.append(k, x)); else url.searchParams.set(k, v);
     }
     let refreshed = false;
-    await budget.take(cost ?? costOf(method, url.pathname, query));
+    await budget.take(cost ?? costOf(method, url.pathname, query), priority);
     for (let attempt = 0; ; attempt++) {
       const token = await this.tokens.getAccessToken();
       const r = await this.fetch(url, {
@@ -77,13 +91,13 @@ class GmailClient {
     }
   }
 
-  get(path, query) { return this.request('GET', path, { query }); }
-  post(path, body, query) { return this.request('POST', path, { body, query }); }
+  get(path, query, opts) { return this.request('GET', path, { query, ...opts }); }
+  post(path, body, query, opts) { return this.request('POST', path, { body, query, ...opts }); }
 
   /** Batch GET of many resources. Returns array aligned with `paths` ({ok, status, body}). */
-  async batchGet(paths, { retries = 8 } = {}) {
+  async batchGet(paths, { retries = 8, priority = PRIORITY.interactive } = {}) {
     if (!paths.length) return [];
-    await budget.take(paths.length * 5);
+    await budget.take(paths.length * 5, priority);
     const boundary = 'batch_' + Math.random().toString(36).slice(2);
     const parts = paths.map((p, i) =>
       `--${boundary}\r\nContent-Type: application/http\r\nContent-ID: <item${i}>\r\n\r\nGET /gmail/v1/users/me${p} HTTP/1.1\r\n\r\n`).join('') + `--${boundary}--\r\n`;
@@ -106,7 +120,7 @@ class GmailClient {
       if (failedIdx.length && attempt < retries) {
         this.log(`gmail batch: ${failedIdx.length} item(s) rate-limited — retry`);
         await sleep(Math.min(90000, 15000 * (attempt + 1)));
-        const again = await this.batchGet(failedIdx.map(i => paths[i]), { retries: retries - attempt - 1 });
+        const again = await this.batchGet(failedIdx.map(i => paths[i]), { retries: retries - attempt - 1, priority });
         failedIdx.forEach((i, k) => { results[i] = again[k]; });
       }
       return results;
@@ -141,4 +155,4 @@ function parseBatchResponse(text, boundary, n) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-module.exports = { GmailClient, GmailError, parseBatchResponse, sleep, isQuotaError, costOf };
+module.exports = { GmailClient, GmailError, parseBatchResponse, sleep, isQuotaError, costOf, PRIORITY, budget };

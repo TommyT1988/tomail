@@ -100,6 +100,9 @@ CREATE INDEX IF NOT EXISTS messages_date ON messages(internal_date DESC);
 CREATE INDEX IF NOT EXISTS messages_acct_date ON messages(account_id, internal_date DESC);
 CREATE INDEX IF NOT EXISTS messages_thread ON messages(account_id, thread_id);
 CREATE INDEX IF NOT EXISTS messages_snooze ON messages(snooze_until) WHERE snooze_until IS NOT NULL;
+-- sidebar counts: walk only the unread/flagged rows instead of every message
+CREATE INDEX IF NOT EXISTS messages_unread ON messages(account_id) WHERE unread = 1 AND snooze_until IS NULL;
+CREATE INDEX IF NOT EXISTS messages_starred ON messages(account_id) WHERE starred = 1;
 CREATE TABLE IF NOT EXISTS message_labels (
   account_id INTEGER NOT NULL,
   message_id TEXT NOT NULL,
@@ -701,20 +704,38 @@ class MailDb {
   deleteDraft(id) { this.prep('DELETE FROM drafts WHERE id = ?').run(id); }
 
   /** Unread counts per (account,label) + favourites, computed locally. */
+  /**
+   * Folder counts for the sidebar. This runs on every refresh, and the database is synchronous on the
+   * main thread, so it must not walk the whole mailbox: at 200k messages the old five-scans-plus-a-join
+   * version took about a second and froze the app each time. Instead, count label rows directly (no
+   * join), then correct with the two small sets — unread and snoozed — through their partial indexes.
+   */
   counts() {
-    const perLabel = this.prep(`SELECT ml.account_id, ml.label_id, count(*) AS total, sum(m.unread) AS unread
-      FROM message_labels ml JOIN messages m ON m.account_id = ml.account_id AND m.id = ml.message_id
-      WHERE m.snooze_until IS NULL GROUP BY ml.account_id, ml.label_id`).all();
     const labels = {};
-    for (const r of perLabel) (labels[r.account_id] ||= {})[r.label_id] = { total: r.total, unread: r.unread };
+    for (const r of this.prep('SELECT account_id, label_id, count(*) AS total FROM message_labels GROUP BY account_id, label_id').all()) {
+      (labels[r.account_id] ||= {})[r.label_id] = { total: r.total, unread: 0 };
+    }
+    for (const r of this.prep(`SELECT ml.account_id, ml.label_id, count(*) AS unread
+      FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id
+      WHERE m.unread = 1 AND m.snooze_until IS NULL GROUP BY ml.account_id, ml.label_id`).all()) {
+      const e = labels[r.account_id]?.[r.label_id]; if (e) e.unread = r.unread;
+    }
+    // snoozed mail is hidden from its folders until it wakes, so it doesn't count towards them
+    for (const r of this.prep(`SELECT ml.account_id, ml.label_id, count(*) AS n
+      FROM messages m JOIN message_labels ml ON ml.account_id = m.account_id AND ml.message_id = m.id
+      WHERE m.snooze_until IS NOT NULL GROUP BY ml.account_id, ml.label_id`).all()) {
+      const e = labels[r.account_id]?.[r.label_id]; if (e) e.total = Math.max(0, e.total - r.n);
+    }
     const fav = this.prep(`SELECT
       (SELECT count(*) FROM messages m WHERE m.unread = 1 AND m.snooze_until IS NULL AND NOT EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id=m.account_id AND x.message_id=m.id AND x.label_id IN ('TRASH','SPAM'))) AS unread,
       (SELECT count(*) FROM messages m WHERE m.starred = 1 AND NOT EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id=m.account_id AND x.message_id=m.id AND x.label_id IN ('TRASH','SPAM'))) AS starred,
-      (SELECT count(*) FROM messages m WHERE m.snooze_until IS NOT NULL) AS snoozed,
-      (SELECT count(*) FROM messages m WHERE m.snooze_until IS NULL AND EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id=m.account_id AND x.message_id=m.id AND x.label_id='INBOX') AND NOT EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id=m.account_id AND x.message_id=m.id AND x.label_id IN ('TRASH','SPAM'))) AS inboxTotal,
-      (SELECT count(*) FROM messages m WHERE m.unread=1 AND m.snooze_until IS NULL AND EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id=m.account_id AND x.message_id=m.id AND x.label_id='INBOX') AND NOT EXISTS (SELECT 1 FROM message_labels x WHERE x.account_id=m.account_id AND x.message_id=m.id AND x.label_id IN ('TRASH','SPAM'))) AS inboxUnread
-    `).get();
-    return { labels, favourites: fav };
+      (SELECT count(*) FROM messages m WHERE m.snooze_until IS NOT NULL) AS snoozed`).get();
+    let inboxTotal = 0, inboxUnread = 0;
+    for (const acc of Object.values(labels)) {
+      const i = acc.INBOX; if (!i) continue;
+      inboxTotal += i.total; inboxUnread += i.unread;
+    }
+    return { labels, favourites: { ...fav, inboxTotal, inboxUnread } };
   }
   kvGet(k) { const r = this.prep('SELECT v FROM kv WHERE k = ?').get(k); return r ? JSON.parse(r.v) : null; }
   kvSet(k, v) { this.prep('INSERT OR REPLACE INTO kv (k, v) VALUES (?,?)').run(k, JSON.stringify(v)); }

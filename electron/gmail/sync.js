@@ -2,13 +2,14 @@
 // Per-account sync: a resumable initial pass (newest first, metadata only),
 // then history.list increments. Bodies are fetched lazily when a message is opened.
 const { parseAddresses, headersToObj } = require('./mime');
-const { sleep, GmailError } = require('./api');
+const { sleep, GmailError, PRIORITY } = require('./api');
 
 const META_HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'References', 'Reply-To', 'Content-Type', 'Authentication-Results'];
 const { parseAuthResults } = require('../authResults');
 const BATCH = 40;          // 40 × 5 units = 200 units per batch; the client's budget paces to ~1 batch/s
 const PAGE = 500;          // messages.list max
 const PAUSE_MS = 50;       // budget does the real pacing
+const BG = { priority: PRIORITY.background };   // sync traffic yields to anything the person is waiting for
 const NEW_MAIL_CHECK_MS = 45000;   // a 200k-message backfill takes hours — look for new mail this often while it runs
 
 /** Gmail message resource (format=metadata|full) → normalised row for db.upsertMessages */
@@ -46,7 +47,7 @@ class AccountSync {
   cancel() { this.cancelled = true; }
 
   async syncLabels() {
-    const j = await this.client.get('/labels');
+    const j = await this.client.get('/labels', null, BG);
     this.db.replaceLabels(this.accountId, j.labels || []);
     return j.labels || [];
   }
@@ -79,7 +80,7 @@ class AccountSync {
     let acct = this.account;
     if (!acct.history_id) {
       // Pin the history cursor BEFORE listing so nothing that changes mid-sync is lost.
-      const prof = await this.client.get('/profile');
+      const prof = await this.client.get('/profile', null, BG);
       this.db.updateAccount(this.accountId, { history_id: String(prof.historyId), total_estimate: prof.messagesTotal || null,
         display_name: acct.display_name || prof.emailAddress });
       acct = this.account;
@@ -89,7 +90,7 @@ class AccountSync {
     for (;;) {
       if (this.cancelled) return;
       this.onProgress({ phase: 'initial', synced, total: acct.total_estimate });
-      const page = await this.client.get('/messages', { maxResults: PAGE, includeSpamTrash: true, pageToken });
+      const page = await this.client.get('/messages', { maxResults: PAGE, includeSpamTrash: true, pageToken }, BG);
       const ids = (page.messages || []).map(m => m.id);
       const known = this.db.existingIds(this.accountId, ids);
       const need = ids.filter(id => !known.has(id));
@@ -130,9 +131,9 @@ class AccountSync {
     this.lastNewCheck = Date.now();   // measure the gap from the END of the check
   }
 
-  async fetchAndStore(ids, format = 'metadata') {
+  async fetchAndStore(ids, format = 'metadata', { priority = PRIORITY.background } = {}) {
     const q = format === 'metadata' ? '?format=metadata&' + META_HEADERS.map(h => 'metadataHeaders=' + h).join('&') : '?format=' + format;
-    const results = await this.client.batchGet(ids.map(id => `/messages/${id}${q}`));
+    const results = await this.client.batchGet(ids.map(id => `/messages/${id}${q}`), { priority });
     const rows = [];
     for (let i = 0; i < results.length; i++) {
       const r = results[i];
@@ -155,7 +156,7 @@ class AccountSync {
     try {
       for (;;) {
         const j = await this.client.get('/history', { startHistoryId: acct.history_id, maxResults: 500, pageToken,
-          historyTypes: ['messageAdded', 'messageDeleted', 'labelAdded', 'labelRemoved'] });
+          historyTypes: ['messageAdded', 'messageDeleted', 'labelAdded', 'labelRemoved'] }, BG);
         for (const h of j.history || []) {
           for (const x of h.messagesAdded || []) added.add(x.message.id);
           for (const x of h.messagesDeleted || []) { deleted.add(x.message.id); added.delete(x.message.id); }

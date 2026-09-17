@@ -117,10 +117,17 @@ class Actions {
     const p = this.providers(accountId);
     const full = await p.fetchFull(id);
     let html = full.html || '';
-    for (const a of full.attachments) {
-      if (!a.contentId || !html.includes('cid:' + a.contentId) || (a.size || 0) > INLINE_MAX) continue;
-      try { const data = await full.inlineData(a); html = html.split('cid:' + a.contentId).join(`data:${a.mimeType};base64,${Buffer.from(data).toString('base64')}`); a.inline = true; }
-      catch (e) { this.log(`inline image ${a.contentId}: ${e.message}`); }
+    // Inline images are fetched TOGETHER, not one after another: each is its own round trip, and a
+    // message with several of them used to open a round trip at a time while you waited.
+    const inline = full.attachments.filter(a => a.contentId && html.includes('cid:' + a.contentId) && (a.size || 0) <= INLINE_MAX);
+    const fetched = await Promise.all(inline.map(async (a) => {
+      try { return { a, data: await full.inlineData(a) }; }
+      catch (e) { this.log(`inline image ${a.contentId}: ${e.message}`); return null; }
+    }));
+    for (const r of fetched) {
+      if (!r) continue;
+      html = html.split('cid:' + r.a.contentId).join(`data:${r.a.mimeType};base64,${Buffer.from(r.data).toString('base64')}`);
+      r.a.inline = true;
     }
     const text = full.text || htmlToText(html);
     // calendar invite: text/calendar part, or an .ics attachment
