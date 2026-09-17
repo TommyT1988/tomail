@@ -25,6 +25,25 @@ jobs:
           TOMAIL_GOOGLE_CLIENT_ID: ${{ secrets.TOMAIL_GOOGLE_CLIENT_ID }}
           TOMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.TOMAIL_GOOGLE_CLIENT_SECRET }}
       - run: npm test
+      # An upload that GitHub cut off mid-way leaves an asset in state "starter" under the file's
+      # name, and every later upload of that name then stalls for half an hour and dies with a 500
+      # ("Error creating asset") — so a re-run of a failed job could never succeed. Clear those first.
+      - name: Remove half-uploaded assets from an earlier attempt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          curl -sf -H "Authorization: token $GH_TOKEN" "$API/releases?per_page=100" \
+            | TAG="$TAG" python3 -c 'import json,os,sys
+          rels=[x for x in json.load(sys.stdin) if x["tag_name"]==os.environ["TAG"]]
+          for a in (rels[0]["assets"] if rels else []):
+              if a["state"]!="uploaded": print(a["id"], a["name"])' \
+            | while read -r id name; do
+                echo "removing half-uploaded $name ($id)"
+                curl -s -o /dev/null -w "%{http_code}\n" -X DELETE -H "Authorization: token $GH_TOKEN" "$API/releases/assets/$id"
+              done
       - run: npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
