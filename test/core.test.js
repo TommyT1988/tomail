@@ -249,6 +249,23 @@ test('sort orders: date asc, size desc, subject ignores Re:/Fwd:', () => {
   db.reorderAccounts([a.id]); assert.equal(db.getAccount(a.id).position, 1);
 });
 
+test('inbox Primary tab: Updates and Forums mail is Primary, as in Gmail by default', () => {
+  const db = new MailDb(':memory:');
+  const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });
+  db.upsertMessages(a.id, [msg('p1', ['INBOX', 'CATEGORY_PERSONAL']), msg('u1', ['INBOX', 'CATEGORY_UPDATES']), msg('f1', ['INBOX', 'CATEGORY_FORUMS']),
+    msg('s1', ['INBOX', 'CATEGORY_SOCIAL']), msg('pr1', ['INBOX', 'CATEGORY_PROMOTIONS'])].map(normaliseMessage));
+  const ids = (v) => db.listMessages(v).map(m => m.id).sort();
+  // an order notification (Gmail files those under Updates) must show in the inbox — there is no Updates tab to find it under
+  assert.deepEqual(ids({ kind: 'label', accountId: a.id, labelId: 'INBOX', category: 'primary' }), ['f1', 'p1', 'u1']);
+  assert.deepEqual(ids({ kind: 'all-inboxes', category: 'primary' }), ['f1', 'p1', 'u1']);
+  assert.equal(db.countMessages({ kind: 'all-inboxes', category: 'primary' }), 3);
+  assert.deepEqual(ids({ kind: 'all-inboxes', category: 'CATEGORY_PROMOTIONS' }), ['pr1']);
+  assert.deepEqual(ids({ kind: 'all-inboxes', category: 'CATEGORY_SOCIAL' }), ['s1']);
+  // the tabs and the query agree on what is "the other tabs"
+  const { CATEGORIES } = require('../src/util.js');
+  assert.deepEqual(CATEGORIES.map(c => c.id), ['primary', 'CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL']);
+});
+
 test('list query uses the (account, date) index', () => {
   const db = new MailDb(':memory:');
   const a = db.addAccount({ email: 'a@x.com', tokenEnc: Buffer.from('plain:{}') });

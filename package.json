@@ -1,7 +1,7 @@
 {
   "name": "tomail",
   "productName": "Tomail",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "description": "Tomail — a fast desktop email client for Gmail and Google Workspace",
   "private": true,
   "main": "electron/main.js",

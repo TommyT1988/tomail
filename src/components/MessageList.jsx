@@ -45,7 +45,7 @@ export default function MessageList({ items, total, loading, view, setView, sele
   return (
     <>
       <div className="tabs">
-        {showCategories ? CATEGORIES.slice(0, 3).map(c => (
+        {showCategories ? CATEGORIES.map(c => (
           <button key={c.id} className={'tab' + ((view.category || 'primary') === c.id ? ' active' : '')} onClick={() => setView({ ...view, category: c.id })}>{c.name}</button>
         )) : <span className="tab active" style={{ cursor: 'default' }}>{viewTitle(view, labelsById, accounts)}</span>}
         <span className="spacer" />

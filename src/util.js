@@ -2,9 +2,10 @@ export const SYSTEM_FOLDERS = [
   { id: 'INBOX', name: 'Inbox', icon: 'inbox', tint: '#2f6fcb' }, { id: 'SENT', name: 'Sent', icon: 'send', tint: '#1f7a33' }, { id: 'TRASH', name: 'Trash', icon: 'trash', tint: '#8a8a8a' },
   { id: 'DRAFT', name: 'Drafts', icon: 'edit', tint: '#7b5bbd' }, { id: 'SPAM', name: 'Junk Email', icon: 'slash', tint: '#c0392b' }, { id: 'ALL', name: 'All Mail', icon: 'layers', tint: '#6b6b6b' },
 ];
+// The inbox tabs. Primary is everything not under one of the other tabs here — Gmail's default set
+// (Updates/Forums stay in Primary, as they do in Gmail unless those tabs are switched on there).
 export const CATEGORIES = [
   { id: 'primary', name: 'Primary' }, { id: 'CATEGORY_PROMOTIONS', name: 'Promotions' }, { id: 'CATEGORY_SOCIAL', name: 'Social' },
-  { id: 'CATEGORY_UPDATES', name: 'Updates' }, { id: 'CATEGORY_FORUMS', name: 'Forums' },
 ];
 
 export function fmtSize(n) {

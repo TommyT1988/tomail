@@ -10,6 +10,11 @@ const fs = require('node:fs');
 const SYSTEM_LABELS = ['INBOX', 'SENT', 'DRAFT', 'TRASH', 'SPAM', 'STARRED', 'UNREAD', 'IMPORTANT',
   'CATEGORY_PERSONAL', 'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS', 'CHAT'];
 const CATEGORY_LABELS = ['CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS'];
+// The inbox tabs Tomail shows. Gmail files every message under one of five categories, but only the
+// tabs a person has switched on take mail out of Primary — and Gmail's defaults are Social and
+// Promotions. Excluding Updates/Forums from Primary as well hid most of a business inbox (order
+// notifications, invoices, receipts are "Updates") with no tab to find them under.
+const TABBED_CATEGORIES = ['CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS'];
 const SNOOZE_LABEL_NAME = 'Snoozed';
 
 const SCHEMA = `
@@ -923,7 +928,7 @@ function orderSql(view, m, dateExpr) {
   }
 }
 function categorySql(category, hasLabel) {
-  if (category === 'primary') return `NOT (${CATEGORY_LABELS.map(hasLabel).join(' OR ')})`;
+  if (category === 'primary') return `NOT (${TABBED_CATEGORIES.map(hasLabel).join(' OR ')})`;
   return hasLabel(category);
 }
 
